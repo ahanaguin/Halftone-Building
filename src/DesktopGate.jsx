@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Wordmark } from './Wordmark.jsx'
 
 export function DesktopGate() {
   const [copied, setCopied] = useState(false)
@@ -24,7 +25,7 @@ export function DesktopGate() {
 
   return (
     <main className="gate">
-      <img src="/Halftone-Wordmark.png" alt="Halftone" />
+      <Wordmark />
       <p>works better on desktop.</p>
       <button type="button" className="button" onClick={copyLink}>
         {copied ? 'Copied' : 'Copy link'}

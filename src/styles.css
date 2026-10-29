@@ -5,7 +5,39 @@
   --muted: #9a9894;
   --panel: #121212;
   --line: #2a2a28;
-  --font: "Geist", sans-serif;
+  --font: "SF Pro Text", "SF Pro", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@font-face {
+  font-family: "SF Pro Text";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local("SF Pro Text"), local("SF Pro Text Regular"), local("SFProText-Regular");
+}
+
+@font-face {
+  font-family: "SF Pro Text";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: local("SF Pro Text Medium"), local("SFProText-Medium");
+}
+
+@font-face {
+  font-family: "SF Pro Text";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: local("SF Pro Text Semibold"), local("SFProText-Semibold");
+}
+
+@font-face {
+  font-family: "SF Pro Text";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local("SF Pro Text Italic"), local("SF Pro Text Regular Italic"), local("SFProText-RegularItalic");
 }
 
 * {
@@ -60,27 +92,212 @@ a {
 }
 
 .button:focus-visible,
-.text-button:focus-visible,
+.icon-button:focus-visible,
 .text-link:focus-visible,
 .nav a:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 3px;
 }
 
-.text-button {
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
   margin: 0;
-  padding: 8px 12px;
+  padding: 0;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--text);
-  font-size: 15px;
-  line-height: 1;
   cursor: pointer;
 }
 
-.text-button:hover {
+.icon-button svg {
+  width: 22px;
+  height: 22px;
+}
+
+.icon-button:hover {
   color: #fff;
+}
+
+.topbar-mark {
+  display: block;
+  width: 132px;
+  height: auto;
+  mix-blend-mode: lighten;
+}
+
+.button-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 20px;
+  border: 1px solid #3a3a36;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-outline:hover {
+  border-color: var(--text);
+}
+
+.button-outline:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+.button-outline:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.upload {
+  min-height: 100vh;
+  padding: 108px 40px 48px;
+}
+
+.upload-inner {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+}
+
+.upload h1 {
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.drop {
+  margin-top: 28px;
+  padding: 56px 24px 40px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #141414;
+  text-align: center;
+}
+
+.drop.dragging {
+  border-color: var(--text);
+}
+
+.drop h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.drop p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.drop .button-outline {
+  margin-top: 22px;
+}
+
+.upload-error {
+  color: #e7b4b0;
+}
+
+.file-input {
+  display: none;
+}
+
+.heard {
+  margin-top: 16px;
+  padding: 22px 22px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #141414;
+}
+
+.heard-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.heard-head strong {
+  font-weight: 500;
+}
+
+.heard-head span {
+  color: var(--muted);
+}
+
+.wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 96px;
+}
+
+.wave span {
+  flex: 1 1 0;
+  min-height: 6px;
+  border-radius: 2px 2px 0 0;
+  background: #6d4aff;
+}
+
+.sections {
+  position: relative;
+  height: 28px;
+  margin-top: 8px;
+}
+
+.sections span {
+  position: absolute;
+  top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.stat {
+  padding: 16px 18px 18px;
+  border-radius: 12px;
+  background: #0c0c0c;
+}
+
+.stat span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.stat strong {
+  display: block;
+  margin-top: 10px;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.upload-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 28px;
 }
 
 .text-link {
@@ -105,10 +322,24 @@ a {
   z-index: 10;
   display: flex;
   align-items: center;
-  height: 64px;
-  padding: 0 16px;
+  justify-content: space-between;
+  height: 72px;
+  padding: 0 28px;
   background: var(--bg);
   border-bottom: 1px solid var(--line);
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topbar-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .screen {
@@ -124,6 +355,7 @@ a {
 
 h1 {
   margin: 0;
+  font-family: "SF Pro Display", "SF Pro Text", "SF Pro", -apple-system, sans-serif;
   font-size: 44px;
   font-weight: 500;
   letter-spacing: -0.04em;
@@ -217,6 +449,15 @@ h1 {
   margin-top: 28px;
 }
 
+.sidebar-bottom {
+  margin-top: auto;
+}
+
+.nav-bottom {
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
 .nav a {
   padding: 10px 14px;
   border-radius: 999px;
@@ -235,7 +476,7 @@ h1 {
 }
 
 .privacy {
-  margin: auto 0 0;
+  margin: 0;
   padding-top: 16px;
   border-top: 1px solid var(--line);
   color: var(--muted);

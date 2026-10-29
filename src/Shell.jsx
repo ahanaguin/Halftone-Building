@@ -1,13 +1,59 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Wordmark } from './Wordmark.jsx'
 
-const ITEMS = [
+const PRIMARY = [
   { to: '/', label: 'New visual', end: true },
   { to: '/visuals', label: 'My visuals' },
   { to: '/palette', label: 'My palette' },
+]
+
+const SECONDARY = [
   { to: '/how-it-works', label: 'How it works' },
   { to: '/feedback', label: 'Send feedback' },
 ]
+
+function Hamburger() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M4 7h16M4 12h16M4 17h16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function Caret() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M14.5 6.5 8.5 12l6 5.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function NavItems({ items }) {
+  return items.map((item) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      end={item.end}
+      className={({ isActive }) => (isActive ? 'active' : undefined)}
+    >
+      {item.label}
+    </NavLink>
+  ))
+}
 
 export function Shell() {
   const [open, setOpen] = useState(false)
@@ -40,15 +86,20 @@ export function Shell() {
   return (
     <div className="app">
       <header className="topbar">
-        <button
-          ref={menuRef}
-          type="button"
-          className="text-button"
-          aria-expanded={open}
-          onClick={() => setOpen(true)}
-        >
-          Menu
-        </button>
+        <div className="topbar-brand">
+          <button
+            ref={menuRef}
+            type="button"
+            className="icon-button"
+            aria-label="Menu"
+            aria-expanded={open}
+            onClick={() => setOpen(true)}
+          >
+            <Hamburger />
+          </button>
+          {location.pathname !== '/' ? <Wordmark className="topbar-mark" /> : null}
+        </div>
+        {location.pathname === '/upload' ? <p className="topbar-status">Palette saved</p> : null}
       </header>
 
       <div
@@ -69,25 +120,22 @@ export function Shell() {
           <button
             ref={closeRef}
             type="button"
-            className="text-button"
+            className="icon-button"
+            aria-label="Close"
             onClick={closeMenu}
           >
-            Close
+            <Caret />
           </button>
         </div>
         <nav className="nav" onClick={closeMenu}>
-          {ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) => (isActive ? 'active' : undefined)}
-            >
-              {item.label}
-            </NavLink>
-          ))}
+          <NavItems items={PRIMARY} />
         </nav>
-        <p className="privacy">Your images stay on this device.</p>
+        <div className="sidebar-bottom">
+          <nav className="nav nav-bottom" onClick={closeMenu}>
+            <NavItems items={SECONDARY} />
+          </nav>
+          <p className="privacy">Your images stay on this device.</p>
+        </div>
       </aside>
 
       <Outlet />

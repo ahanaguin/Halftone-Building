@@ -11,8 +11,9 @@ import {
   PickStyle,
   SendFeedback,
   Studio,
-  Upload,
 } from './screens.jsx'
+import { TrackProvider } from './track.jsx'
+import { Upload } from './Upload.jsx'
 import { useNarrow } from './useNarrow.js'
 
 export default function App() {
@@ -21,22 +22,24 @@ export default function App() {
   if (narrow) return <DesktopGate />
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<Shell />}>
-          <Route index element={<Landing />} />
-          <Route path="calibrate" element={<Calibrate />} />
-          <Route path="upload" element={<Upload />} />
-          <Route path="pick-a-style" element={<PickStyle />} />
-          <Route path="studio" element={<Studio />} />
-          <Route path="export" element={<Export />} />
-          <Route path="visuals" element={<MyVisuals />} />
-          <Route path="palette" element={<MyPalette />} />
-          <Route path="how-it-works" element={<HowItWorks />} />
-          <Route path="feedback" element={<SendFeedback />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <TrackProvider>
+      <BrowserRouter>
+        <Routes>
+            <Route element={<Shell />}>
+            <Route index element={<Landing />} />
+            <Route path="calibrate" element={<Calibrate />} />
+            <Route path="upload" element={<Upload />} />
+            <Route path="pick-a-style" element={<PickStyle />} />
+            <Route path="studio" element={<Studio />} />
+            <Route path="export" element={<Export />} />
+            <Route path="visuals" element={<MyVisuals />} />
+            <Route path="palette" element={<MyPalette />} />
+            <Route path="how-it-works" element={<HowItWorks />} />
+            <Route path="feedback" element={<SendFeedback />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </TrackProvider>
   )
 }

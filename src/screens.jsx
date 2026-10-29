@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { Wordmark } from './Wordmark.jsx'
 
 function Screen({ title, lede, action, to, back, backTo }) {
   return (
@@ -25,7 +26,7 @@ export function Landing() {
   return (
     <main className="screen screen-landing">
       <h1 className="wordmark-title">
-        <img src="/Halftone-Wordmark.png" alt="Halftone" />
+        <Wordmark />
       </h1>
       <Link className="button" to="/calibrate">
         New visual
@@ -43,19 +44,6 @@ export function Calibrate() {
       to="/upload"
       back="Back"
       backTo="/"
-    />
-  )
-}
-
-export function Upload() {
-  return (
-    <Screen
-      title="Upload"
-      lede="Add a photo to begin."
-      action="Continue"
-      to="/pick-a-style"
-      back="Back"
-      backTo="/calibrate"
     />
   )
 }
