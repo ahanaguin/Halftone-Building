@@ -2,24 +2,12 @@ import { hexToRgb, hslToHex, rgbToHsl } from './palette.js'
 
 export const PAPER = '#EDE8DF'
 export const INK_BLACK = '#111111'
-export const SECTION_BLEND = 0.9
+export const SECTION_BLEND = 1.7
 
 const POOLS = {
-  calm: {
-    soft: ['eclipse', 'eclipse', 'beam'],
-    mid: ['eclipse', 'beam'],
-    sharp: ['beam', 'diagonal'],
-  },
-  build: {
-    soft: ['diagonal', 'eclipse'],
-    mid: ['diagonal', 'beam'],
-    sharp: ['diagonal', 'burst'],
-  },
-  high: {
-    soft: ['grid', 'grid', 'eclipse'],
-    mid: ['grid', 'burst'],
-    sharp: ['burst', 'burst', 'diagonal'],
-  },
+  calm: ['eclipse', 'eclipse', 'beam'],
+  build: ['diagonal', 'beam', 'burst'],
+  high: ['burst', 'grid', 'eclipse'],
 }
 
 export function mulberry32(seed) {
@@ -58,14 +46,8 @@ function energyOf(label) {
   return 'calm'
 }
 
-function feelOf(roundness) {
-  if (roundness >= 0.62) return 'soft'
-  if (roundness <= 0.38) return 'sharp'
-  return 'mid'
-}
-
-export function pickRecipe(seed, label, roundness, dropIndex = 0) {
-  const pool = POOLS[energyOf(label)][feelOf(roundness)]
+export function pickRecipe(seed, label, _roundness, dropIndex = 0) {
+  const pool = POOLS[energyOf(label)]
   const rand = mulberry32(seed || 1)
   const base = Math.floor(rand() * pool.length)
   if (!dropIndex) return pool[base]
@@ -205,10 +187,27 @@ export function motionAt({ profile, time = 0, tempo = 100, seed = 1, section = n
     mid,
     high,
     ink,
+    swell: bassLevel(profile, time),
     beats,
     tension: tensionAt(section, time, profile),
     frame: frameCut(time, bpm, seed),
   }
+}
+
+function bassLevel(profile, time) {
+  const timeline = profile?.timeline
+  if (!timeline?.bass?.length) return 0
+  const hop = timeline.hop || 0.05
+  const index = Math.min(timeline.bass.length - 1, Math.max(0, Math.floor((time || 0) / hop)))
+  let sum = 0
+  let count = 0
+  for (let step = 0; step < 3; step += 1) {
+    const at = index - step
+    if (at < 0) break
+    sum += unitLoud(timeline.bass[at], profile.bass)
+    count += 1
+  }
+  return count ? sum / count : 0
 }
 
 function parseColor(hex) {
@@ -290,11 +289,11 @@ export function pickGround(colors, seed) {
 }
 
 export const SHAPE_RANGE = {
-  eclipse: { min: 2, max: 5, count: 3 },
-  beam: { min: 2, max: 6, count: 3 },
-  diagonal: { min: 2, max: 4, count: 2 },
-  burst: { min: 3, max: 8, count: 6 },
-  grid: { min: 4, max: 16, count: 16 },
+  eclipse: { min: 2, max: 8, count: 6 },
+  beam: { min: 2, max: 8, count: 5 },
+  diagonal: { min: 2, max: 8, count: 5 },
+  burst: { min: 2, max: 8, count: 7 },
+  grid: { min: 2, max: 8, count: 6 },
 }
 
 export function shapeScale(size) {
@@ -343,21 +342,6 @@ export function posterStyle(colors, seed) {
   }
 }
 
-export function explainPoster(recipe) {
-  if (recipe === 'eclipse') {
-    return 'Two huge halves enter from opposite edges and face each other. Kicks slide them, snares shift the center, and the lines draw themselves in.'
-  }
-  if (recipe === 'beam') {
-    return 'Tall triangles fan around a sphere at the bottom. The sphere rides the kicks, and the beams sway on the snare.'
-  }
-  if (recipe === 'diagonal') {
-    return 'A single large triangle cuts across the frame, with a circle that slides along the cut. Brighter hits draw the guides in.'
-  }
-  if (recipe === 'burst') {
-    return 'Thick wedges fan around one center and keep turning with the tempo. Kicks move the arcs, and a build opens the fan until the drop lets it go.'
-  }
-  if (recipe === 'grid') {
-    return 'Large circles sit on a four by four grid. Kicks lift them, and the overlapping circles slide out on the snare.'
-  }
-  return 'Each section holds one poster. Bass, mids, and highs each move a different part, and the frame keeps drifting with the tempo.'
+export function explainPoster() {
+  return 'Soft blobs drift, merge, and split. Bass swells them, beats pop a small one off or pull it back in, and a new section travels into place unless it is a drop.'
 }

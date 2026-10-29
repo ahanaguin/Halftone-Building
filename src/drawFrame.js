@@ -2,10 +2,10 @@ import { paletteColors, swatchHex } from './palette.js'
 import { drawPoster } from './posters.js'
 import { metricsAt } from './profileTrack.js'
 import {
+  PAPER,
   SECTION_BLEND,
   leadColors,
   motionAt,
-  posterStyle,
   previousSection,
   pickRecipe,
   sectionAt,
@@ -14,23 +14,6 @@ import {
   shapeCount,
   shapeScale,
 } from './shapeLayout.js'
-
-const buffers = [null, null]
-
-function scratch(index, width, height) {
-  const pixelWidth = Math.max(1, Math.round(width))
-  const pixelHeight = Math.max(1, Math.round(height))
-  let canvas = buffers[index]
-  if (!canvas) {
-    canvas = document.createElement('canvas')
-    buffers[index] = canvas
-  }
-  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-    canvas.width = pixelWidth
-    canvas.height = pixelHeight
-  }
-  return canvas
-}
 
 let grainCanvas = null
 
@@ -61,7 +44,7 @@ function paintGrain(ctx, width, height) {
   const transform = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null
   ctx.save()
   ctx.globalCompositeOperation = 'overlay'
-  ctx.globalAlpha = 0.1
+  ctx.globalAlpha = 0.2
   ctx.fillStyle = ctx.createPattern(grainSource(), 'repeat')
   if (transform) {
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -101,11 +84,12 @@ function describe(spec, section, sections) {
   const index = Math.max(0, sections.findIndex((item) => item.start === section?.start && item.label === section?.label))
   const edit = section ? spec.edits?.[sectionKey(section)] : null
   const colors = leadColors(paletteEntries(spec), index, edit?.colors)
-  const style = posterStyle(colors, seed)
   return {
     recipe,
     seed,
-    ...style,
+    ground: PAPER,
+    inks: colors,
+    roundness: spec.roundness ?? 0.7,
     count: shapeCount(recipe, edit?.count),
     scale: shapeScale(edit?.size),
     offsetX: edit?.x || 0,
@@ -128,21 +112,22 @@ export function paintFrame(ctx, spec) {
   const current = describe(spec, section, sections)
   const elapsed = (spec.time || 0) - (section?.start || 0)
   const previous = previousSection(sections, section)
-  const blending = previous && current && elapsed >= 0 && elapsed < SECTION_BLEND
+  const hardCut = section?.label === 'Drop'
+  const blending = !hardCut && previous && current && elapsed >= 0 && elapsed < SECTION_BLEND
   const blend = blending ? smoothstep(elapsed / SECTION_BLEND) : 1
 
   ctx.save()
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
   if (blending && blend < 1) {
-    const from = scratch(0, width, height)
-    const to = scratch(1, width, height)
     const outgoing = describe({ ...spec, time: Math.max(0, section.start - 0.001) }, previous, sections)
-    drawPoster(from.getContext('2d'), { ...outgoing, width, height })
-    drawPoster(to.getContext('2d'), { ...current, width, height })
-    ctx.drawImage(from, 0, 0, width, height)
-    ctx.globalAlpha = blend
-    ctx.drawImage(to, 0, 0, width, height)
+    drawPoster(ctx, {
+      ...current,
+      width,
+      height,
+      morphFrom: { ...outgoing, width, height },
+      morph: blend,
+    })
   } else {
     drawPoster(ctx, { ...current, width, height })
   }
