@@ -10,8 +10,8 @@ import {
   MyVisuals,
   PickStyle,
   SendFeedback,
-  Studio,
 } from './screens.jsx'
+import { Studio } from './Studio.jsx'
 import { TrackProvider } from './track.jsx'
 import { Upload } from './Upload.jsx'
 import { useNarrow } from './useNarrow.js'

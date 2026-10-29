@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { useTrack } from './track.jsx'
 import { Wordmark } from './Wordmark.jsx'
 
 const PRIMARY = [
@@ -58,6 +59,8 @@ function NavItems({ items }) {
 export function Shell() {
   const [open, setOpen] = useState(false)
   const location = useLocation()
+  const { track } = useTrack()
+  const studio = location.pathname === '/studio'
   const menuRef = useRef(null)
   const closeRef = useRef(null)
 
@@ -99,7 +102,22 @@ export function Shell() {
           </button>
           {location.pathname !== '/' ? <Wordmark className="topbar-mark" /> : null}
         </div>
-        {location.pathname === '/upload' ? <p className="topbar-status">Palette saved</p> : null}
+        {studio ? <p className="topbar-track">{track?.fileName ?? 'No track yet'}</p> : null}
+        {studio ? (
+          <div className="studio-actions">
+            <Link to="/pick-a-style" className="text-link back-styles">
+              {'< Back to styles'}
+            </Link>
+            <button type="button" className="button-outline undo-button">
+              Undo
+            </button>
+            <Link to="/export" className="button">
+              Export
+            </Link>
+          </div>
+        ) : location.pathname === '/upload' ? (
+          <p className="topbar-status">Palette saved</p>
+        ) : null}
       </header>
 
       <div

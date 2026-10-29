@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { analyzeTrack } from './analyzeTrack.js'
+import { SHORT_TRACK_MESSAGE, analyzeTrack } from './analyzeTrack.js'
 import { useTrack } from './track.jsx'
 
 function sectionStyle(section, duration) {
@@ -11,25 +11,70 @@ function sectionStyle(section, duration) {
   return { left: `${center}%`, transform }
 }
 
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M3 1.5v9l8-4.5-8-4.5z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function PauseIcon() {
+  return (
+    <svg viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M2 1.5h3v9H2zm5 0h3v9H7z" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function Upload() {
   const { track, setTrack } = useTrack()
   const inputRef = useRef(null)
+  const audioRef = useRef(null)
   const [dragging, setDragging] = useState(false)
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
+  const [playing, setPlaying] = useState(false)
+  const [audioUrl, setAudioUrl] = useState('')
+
+  useEffect(() => {
+    if (!track?.file) {
+      setAudioUrl('')
+      setPlaying(false)
+      return undefined
+    }
+    const url = URL.createObjectURL(track.file)
+    setAudioUrl(url)
+    setPlaying(false)
+    return () => URL.revokeObjectURL(url)
+  }, [track?.file])
 
   async function accept(file) {
+    audioRef.current?.pause()
+    setPlaying(false)
     setTrack(null)
     setError('')
     setStatus('loading')
     try {
       const analysis = await analyzeTrack(file)
-      setTrack(analysis)
+      setTrack({ ...analysis, file })
       setStatus('ready')
     } catch (caught) {
       setTrack(null)
       setStatus('error')
       setError(caught instanceof Error ? caught.message : 'That file could not be read.')
+    }
+  }
+
+  function togglePlay() {
+    const audio = audioRef.current
+    if (!audio) return
+    if (audio.paused) {
+      audio.play()
+      setPlaying(true)
+    } else {
+      audio.pause()
+      setPlaying(false)
     }
   }
 
@@ -63,25 +108,46 @@ export function Upload() {
           }}
           onDrop={onDrop}
         >
-          <h2>Drop an MP3 or WAV here</h2>
-          <p>
-            {busy
-              ? 'Analyzing your track…'
-              : 'Up to 10 minutes · Analyzed on your device, never uploaded'}
-          </p>
-          {error ? (
+          <h2>{track ? track.fileName : 'Drop an MP3 or WAV here'}</h2>
+          {track ? null : (
+            <p>{busy ? 'Analyzing your track…' : 'Up to 10 minutes · Analyzed on your device, never uploaded'}</p>
+          )}
+          {error && error !== SHORT_TRACK_MESSAGE ? (
             <p className="upload-error" role="alert">
               {error}
             </p>
           ) : null}
-          <button
-            type="button"
-            className="button-outline"
-            disabled={busy}
-            onClick={() => inputRef.current?.click()}
-          >
-            Choose file
-          </button>
+          <div className="drop-actions">
+            {track ? (
+              <button type="button" className="button-outline play-button" onClick={togglePlay} aria-pressed={playing}>
+                {playing ? <PauseIcon /> : <PlayIcon />}
+                {playing ? 'Pause' : 'Play'}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="button-outline"
+              disabled={busy}
+              onClick={() => inputRef.current?.click()}
+            >
+              Choose file
+            </button>
+          </div>
+          {error === SHORT_TRACK_MESSAGE ? (
+            <p className="upload-note" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {audioUrl ? (
+            <audio
+              ref={audioRef}
+              src={audioUrl}
+              preload="auto"
+              onEnded={() => setPlaying(false)}
+              onPause={() => setPlaying(false)}
+              onPlay={() => setPlaying(true)}
+            />
+          ) : null}
           <input
             ref={inputRef}
             className="file-input"
@@ -101,9 +167,15 @@ export function Upload() {
               <strong>{track.fileName}</strong>
               <span>Here's what we've heard</span>
             </div>
-            <div className="wave" aria-hidden="true">
+            <div className={playing ? 'wave playing' : 'wave'} aria-hidden="true">
               {track.bars.map((level, index) => (
-                <span key={index} style={{ height: `${Math.max(6, level * 100)}%` }} />
+                <span
+                  key={index}
+                  style={{
+                    height: `${Math.max(6, level * 100)}%`,
+                    '--i': index,
+                  }}
+                />
               ))}
             </div>
             <div className="sections">

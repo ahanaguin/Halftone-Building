@@ -1,5 +1,8 @@
 import { guess } from 'web-audio-beat-detector'
+import { profileFromChannel } from './profileTrack.js'
 
+export const MIN_TRACK_SECONDS = 15
+export const SHORT_TRACK_MESSAGE = 'Add at least 15 seconds of music so Halftone can read the energy and mood clearly.'
 export const MAX_TRACK_SECONDS = 10 * 60
 
 const BAR_COUNT = 64
@@ -172,6 +175,10 @@ export async function analyzeTrack(file) {
     await context.close()
   }
 
+  if (audioBuffer.duration < MIN_TRACK_SECONDS) {
+    throw new Error(SHORT_TRACK_MESSAGE)
+  }
+
   if (audioBuffer.duration > MAX_TRACK_SECONDS + 0.25) {
     throw new Error('This track is longer than 10 minutes.')
   }
@@ -193,5 +200,6 @@ export async function analyzeTrack(file) {
     brightness,
     bars,
     sections: sectionsFromEnergy(envelope, audioBuffer.duration),
+    profile: profileFromChannel(channel, audioBuffer.sampleRate),
   }
 }

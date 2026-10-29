@@ -61,19 +61,6 @@ export function PickStyle() {
   )
 }
 
-export function Studio() {
-  return (
-    <Screen
-      title="Studio"
-      lede="Adjust the visual here."
-      action="Continue"
-      to="/export"
-      back="Back"
-      backTo="/pick-a-style"
-    />
-  )
-}
-
 export function Export() {
   return (
     <Screen
