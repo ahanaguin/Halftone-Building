@@ -42,6 +42,21 @@ function inkAt(inks, index) {
   return inks[index % inks.length]
 }
 
+function scaleOf(poster) {
+  return poster.scale ?? 1
+}
+
+function countOf(poster, fallback) {
+  return Number.isFinite(poster.count) ? poster.count : fallback
+}
+
+function shiftOf(poster) {
+  return {
+    x: (poster.offsetX || 0) * poster.width,
+    y: (poster.offsetY || 0) * poster.height,
+  }
+}
+
 function misregister(poster, layer) {
   const amount = Math.min(poster.width, poster.height) * 0.005 * (live(poster).ink || 0)
   if (amount < 0.4) return null
@@ -78,11 +93,14 @@ function drawEclipse(ctx, poster) {
   const upper = rand() > 0.5
   const y1 = height * (upper ? 0.44 : 0.56)
   const y2 = height * (upper ? 0.58 : 0.42)
-  const r1 = height * (0.56 + rand() * 0.06)
-  const r2 = height * (0.52 + rand() * 0.06)
+  const scale = scaleOf(poster)
+  const count = countOf(poster, 3)
+  const r1 = height * (0.56 + rand() * 0.06) * scale
+  const r2 = height * (0.52 + rand() * 0.06) * scale
   const x1 = -r1 * 0.05
   const x2 = width + r2 * 0.05
   const leftFirst = rand() > 0.5
+  const shift = shiftOf(poster)
   const drift = Math.sin(motion.beats * 0.22) * width * 0.018
   const slide = drift + motion.bass * width * 0.075 + motion.tension * width * 0.02
   const bob = Math.sin(motion.beats * 0.17 + 0.6) * height * 0.016
@@ -95,16 +113,23 @@ function drawEclipse(ctx, poster) {
     fill(ctx, color, mode, moved)
   }
 
-  half(x1 + slide, y1 + bob, r1, true, inkAt(inks, leftFirst ? 0 : 1), misregister(poster, 'main'))
-  half(x2 - slide * 0.65, y2 - bob, r2, false, inkAt(inks, leftFirst ? 1 : 0), misregister(poster, 'main'))
-
-  const midX = width / 2 + Math.sin(motion.beats * 0.19 + 2) * width * 0.01
-  const midY = (y1 + y2) / 2 - motion.bass * height * 0.055 - motion.mid * height * 0.03 + Math.sin(motion.beats * 0.21) * height * 0.02
+  half(x1 + slide + shift.x, y1 + bob + shift.y, r1, true, inkAt(inks, leftFirst ? 0 : 1), misregister(poster, 'main'))
+  half(x2 - slide * 0.65 + shift.x, y2 - bob + shift.y, r2, false, inkAt(inks, leftFirst ? 1 : 0), misregister(poster, 'main'))
+  const midX = width / 2 + Math.sin(motion.beats * 0.19 + 2) * width * 0.01 + shift.x
+  const midY = (y1 + y2) / 2 - motion.bass * height * 0.055 - motion.mid * height * 0.03 + Math.sin(motion.beats * 0.21) * height * 0.02 + shift.y
   const gap = x2 - r2 - (x1 + r1)
-  const bridge = Math.max(height * 0.2, gap / 2 + height * 0.08) * (1 - motion.tension * 0.06)
-  ctx.beginPath()
-  ctx.arc(midX, midY, bridge, 0, Math.PI * 2)
-  fill(ctx, inks.length > 2 ? inks[2] : inkAt(inks, leftFirst ? 1 : 0), mode, misregister(poster, 'second'))
+  const bridge = Math.max(height * 0.2, gap / 2 + height * 0.08) * (1 - motion.tension * 0.06) * scale
+  if (count >= 3) {
+    ctx.beginPath()
+    ctx.arc(midX, midY, bridge, 0, Math.PI * 2)
+    fill(ctx, inks[0], mode, misregister(poster, 'main'))
+  }
+  for (let extra = 0; extra < count - 3; extra += 1) {
+    const angle = extra * 2.2 + 0.4
+    ctx.beginPath()
+    ctx.arc(midX + Math.cos(angle) * bridge * 0.85, midY + Math.sin(angle) * bridge * 0.55, bridge * 0.28, 0, Math.PI * 2)
+    fill(ctx, inkAt(inks, extra + 1), mode, misregister(poster, 'second'))
+  }
 
   const guide = lineWidth(width, height)
   const drawn = lineAmount(poster)
@@ -116,10 +141,12 @@ function drawBeam(ctx, poster) {
   const { width, height, inks, mode, seed } = poster
   const motion = live(poster)
   const rand = mulberry32((seed || 1) ^ 0xbea1)
-  const sx = width * (0.42 + rand() * 0.16)
-  const sy = height * 0.84 + Math.sin(motion.beats * 0.2) * height * 0.02 - motion.bass * height * 0.1
-  const sr = height * (0.26 + rand() * 0.06)
-  const count = 3
+  const scale = scaleOf(poster)
+  const shift = shiftOf(poster)
+  const sx = width * (0.42 + rand() * 0.16) + shift.x
+  const sy = height * 0.84 + Math.sin(motion.beats * 0.2) * height * 0.02 - motion.bass * height * 0.1 + shift.y
+  const sr = height * (0.26 + rand() * 0.06) * scale
+  const count = countOf(poster, 3)
   const fan = Math.sin(motion.beats * 0.16) * 0.1 + motion.mid * 0.34
   const spread = sr * (0.38 + motion.tension * 0.7)
   const triangles = []
@@ -127,8 +154,8 @@ function drawBeam(ctx, poster) {
   for (let index = 0; index < count; index += 1) {
     const across = index / (count - 1)
     const center = width * (-0.02 + across * 1.04)
-    const baseLeft = center - width * (0.18 + motion.tension * 0.06)
-    const baseRight = center + width * (0.18 + motion.tension * 0.06)
+    const baseLeft = center - width * (0.18 + motion.tension * 0.06) * scale
+    const baseRight = center + width * (0.18 + motion.tension * 0.06) * scale
     const apexX = sx + (across - 0.5) * spread
     const apexY = sy - sr * 0.05
     const angle = fan * (across - 0.5) * 2
@@ -146,7 +173,7 @@ function drawBeam(ctx, poster) {
 
   ctx.beginPath()
   ctx.arc(sx, sy, sr, 0, Math.PI * 2)
-  fill(ctx, inkAt(inks, inks.length - 1), mode, misregister(poster, 'main'))
+  fill(ctx, inks[0], mode, misregister(poster, 'main'))
 
   const guide = lineWidth(width, height)
   const drawn = lineAmount(poster)
@@ -187,18 +214,26 @@ function drawDiagonal(ctx, poster) {
   ctx.closePath()
   fill(ctx, inkAt(inks, 0), mode, misregister(poster, 'second'))
 
+  const scale = scaleOf(poster)
+  const shift = shiftOf(poster)
+  const count = countOf(poster, 2)
   const along = 0.38 + rand() * 0.24 + Math.sin(motion.beats * 0.18) * 0.025 + motion.bass * 0.055 - motion.tension * 0.04
-  const cx = p1.x + dx * along
-  const cy = p1.y + dy * along
-  const radius = height * (0.2 + rand() * 0.1)
+  const cx = p1.x + dx * along + shift.x
+  const cy = p1.y + dy * along + shift.y
+  const radius = height * (0.2 + rand() * 0.1) * scale
   ctx.beginPath()
   ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-  fill(ctx, inkAt(inks, 1), mode, misregister(poster, 'main'))
+  fill(ctx, inks[0], mode, misregister(poster, 'main'))
 
-  if (inks[2]) {
+  if (count >= 3) {
     ctx.beginPath()
     ctx.arc(cx - radius * 0.2, cy + radius * 0.15, radius * (0.28 + motion.high * 0.16), 0, Math.PI * 2)
-    fill(ctx, inks[2], mode, misregister(poster, 'second'))
+    fill(ctx, inkAt(inks, 1), mode, misregister(poster, 'second'))
+  }
+  if (count >= 4) {
+    ctx.beginPath()
+    ctx.arc(cx + radius * 0.35, cy - radius * 0.2, radius * 0.22, 0, Math.PI * 2)
+    fill(ctx, inkAt(inks, 2), mode, misregister(poster, 'second'))
   }
 
   const guide = lineWidth(width, height)
@@ -233,17 +268,19 @@ function drawBurst(ctx, poster) {
   const motion = live(poster)
   const rand = mulberry32((seed || 1) ^ 0xb057)
   const anchor = Math.floor(rand() * 3)
+  const scale = scaleOf(poster)
+  const shift = shiftOf(poster)
   const focal = [
     { x: width * 0.5, y: height * 0.46 },
     { x: width * 0.02, y: height * 0.52 },
     { x: width * 0.5, y: height * 0.92 },
   ][anchor]
-  focal.x += Math.sin(motion.beats * 0.18) * width * 0.008
-  focal.y += Math.sin(motion.beats * 0.21 + 1) * height * 0.012 + motion.bass * height * 0.02
-  const bars = 6
+  focal.x += Math.sin(motion.beats * 0.18) * width * 0.008 + shift.x
+  focal.y += Math.sin(motion.beats * 0.21 + 1) * height * 0.012 + motion.bass * height * 0.02 + shift.y
+  const bars = countOf(poster, 6)
   const sweep = (Math.PI * 2) / bars
   const thick = sweep * (0.4 + motion.tension * 0.14)
-  const reach = Math.hypot(width, height) * (0.82 - motion.tension * 0.08)
+  const reach = Math.hypot(width, height) * (0.82 - motion.tension * 0.08) * scale
   const hub = Math.min(width, height) * 0.03
   const fan = Math.sin(motion.beats * 0.14) * 0.1 + motion.mid * 0.2
   const turn = rand() * 0.4 + fan
@@ -254,11 +291,11 @@ function drawBurst(ctx, poster) {
     fill(ctx, inkAt(inks, index), mode, misregister(poster, 'second'))
   }
 
-  const arcReach = Math.min(width, height) * (0.34 + motion.bass * 0.045)
+  const arcReach = Math.min(width, height) * (0.34 + motion.bass * 0.045) * scale
   const weight = Math.min(width, height) * 0.045
   const arcSweep = Math.PI * (1.05 + lineAmount(poster) * 0.45)
   band(ctx, focal.x, focal.y, arcReach, arcReach + weight, turn + 0.2, turn + 0.2 + arcSweep)
-  fill(ctx, inkAt(inks, 1), mode, misregister(poster, 'main'))
+  fill(ctx, inks[0], mode, misregister(poster, 'main'))
   if (motion.tension > 0.3) {
     band(ctx, focal.x, focal.y, arcReach * 1.55, arcReach * 1.55 + weight * 1.35, turn + 1.1, turn + 1.1 + arcSweep * 0.8)
     fill(ctx, inkAt(inks, 0), mode, misregister(poster, 'main'))
@@ -285,14 +322,17 @@ function drawGrid(ctx, poster) {
   const { width, height, inks, mode, seed } = poster
   const motion = live(poster)
   const rand = mulberry32((seed || 1) ^ 0x671d)
-  const cols = 4
-  const rows = 4
-  const cell = Math.min(width, height) / 3.3
+  const scale = scaleOf(poster)
+  const shift = shiftOf(poster)
+  const count = countOf(poster, 16)
+  const cols = count <= 4 ? 2 : count <= 9 ? 3 : 4
+  const rows = cols
+  const cell = Math.min(width, height) / (cols * 0.825)
   const grid = cell * (cols - 1)
   const lift = Math.sin(motion.beats * 0.18) * cell * 0.035 - motion.bass * cell * 0.09
-  const originX = (width - grid) / 2
-  const originY = (height - grid) / 2 + lift
-  const radius = cell * 0.58
+  const originX = (width - grid) / 2 + shift.x
+  const originY = (height - grid) / 2 + lift + shift.y
+  const radius = cell * 0.58 * scale
   const cells = []
 
   for (let row = 0; row < rows; row += 1) {

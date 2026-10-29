@@ -69,60 +69,319 @@ function normalize(values) {
   return values.map((value) => value / max)
 }
 
-function sectionLabel(values) {
-  const body = values.slice(0, Math.max(1, Math.ceil(values.length * 0.8)))
-  const average = body.reduce((sum, value) => sum + value, 0) / body.length
-  const rise = body[body.length - 1] - body[0]
-  if (average < 0.4) return rise > 0.22 ? 'Build' : 'Quiet'
-  if (rise > 0.16 && average < 0.7) return 'Build'
-  if (average >= 0.62) return 'Peak'
-  return rise > 0.1 ? 'Build' : 'Quiet'
+const WINDOW = 0.5
+const MIN_SECTION = 8
+
+function average(values) {
+  if (!values.length) return 0
+  return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
-export function sectionsFromEnergy(envelope, duration) {
-  const smooth = normalize(envelope).map((value, index, all) => {
-    const previous = all[index - 1] ?? value
-    const next = all[index + 1] ?? value
-    return (previous + value + next) / 3
-  })
+function deviation(values) {
+  if (values.length < 2) return 0
+  const mid = average(values)
+  return Math.sqrt(average(values.map((value) => (value - mid) ** 2)))
+}
 
-  if (smooth.length < 4) {
-    return [{ start: 0, end: duration, label: sectionLabel(smooth.length ? smooth : [0]) }]
-  }
-
-  const diffs = smooth.map((value, index) => (index === 0 ? 0 : Math.abs(value - smooth[index - 1])))
-  const meanDiff = diffs.reduce((sum, value) => sum + value, 0) / diffs.length
-  const threshold = Math.max(0.07, meanDiff * 2.4)
-  const minGap = Math.max(2, Math.round(smooth.length * 0.1))
-  const cuts = [0]
-
-  for (let index = 1; index < smooth.length - 1; index += 1) {
-    if (index - cuts[cuts.length - 1] < minGap) continue
-    const change = diffs[index]
-    if (change >= threshold && change >= diffs[index - 1] && change >= diffs[index + 1]) {
-      cuts.push(index)
+function smoothSeries(values, radius = 2) {
+  return values.map((value, index) => {
+    let total = 0
+    let weight = 0
+    for (let offset = -radius; offset <= radius; offset += 1) {
+      const sample = values[Math.min(values.length - 1, Math.max(0, index + offset))]
+      const coefficient = radius + 1 - Math.abs(offset)
+      total += sample * coefficient
+      weight += coefficient
     }
+    return total / weight
+  })
+}
+
+function onsetSeries(channel, sampleRate) {
+  const frameSec = 0.02
+  const frame = Math.max(1, Math.round(sampleRate * frameSec))
+  const energies = []
+  for (let start = 0; start + frame <= channel.length; start += frame) {
+    let sum = 0
+    for (let index = start; index < start + frame; index += 1) sum += channel[index] * channel[index]
+    energies.push(sum / frame)
+  }
+  const flux = energies.map((energy, index) => Math.max(0, energy - (energies[index - 1] ?? energy)))
+  const mid = average(flux)
+  const spread = deviation(flux)
+  const gate = Math.max(mid + spread * 0.9, 1e-8)
+  const minFrames = Math.max(2, Math.round(0.07 / frameSec))
+  const hits = []
+  let previous = -minFrames
+  for (let index = 1; index < flux.length - 1; index += 1) {
+    if (index - previous < minFrames) continue
+    if (flux[index] < gate || flux[index] < flux[index - 1] || flux[index] <= flux[index + 1]) continue
+    hits.push(index)
+    previous = index
+  }
+  const windows = Math.max(1, Math.floor(channel.length / Math.round(sampleRate * WINDOW)))
+  const density = Array.from({ length: windows }, () => 0)
+  const framesPerWindow = Math.max(1, Math.round(WINDOW / frameSec))
+  for (const hit of hits) {
+    const bucket = Math.min(windows - 1, Math.floor(hit / framesPerWindow))
+    density[bucket] += 1 / WINDOW
+  }
+  return {
+    density,
+    flux,
+    frameSec,
+    perSecond: hits.length / Math.max(WINDOW, channel.length / sampleRate),
+  }
+}
+
+function pulseAt(flux, frameSec, bpm) {
+  if (!flux?.length || !(bpm > 0)) return 0
+  const lag = Math.round(60 / bpm / frameSec)
+  if (lag < 2 || lag >= flux.length / 2) return 0
+  let match = 0
+  let left = 0
+  let right = 0
+  const last = flux.length - lag
+  for (let index = 0; index < last; index += 1) {
+    match += flux[index] * flux[index + lag]
+    left += flux[index] * flux[index]
+    right += flux[index + lag] * flux[index + lag]
+  }
+  return match / Math.sqrt(left * right || 1)
+}
+
+function measureTrack(channel, sampleRate) {
+  const hop = Math.max(1, Math.round(sampleRate * WINDOW))
+  const windows = Math.max(1, Math.floor(channel.length / hop))
+  const loud = new Array(windows)
+  const bright = new Array(windows)
+  const step = 1 / sampleRate
+  const coefficient = step / (step + 1 / (2 * Math.PI * 1800))
+  let lowpass = 0
+
+  for (let window = 0; window < windows; window += 1) {
+    const start = window * hop
+    let sum = 0
+    let lowEnergy = 0
+    let highEnergy = 0
+    for (let index = start; index < start + hop; index += 1) {
+      const sample = channel[index]
+      sum += sample * sample
+      lowpass += coefficient * (sample - lowpass)
+      const high = sample - lowpass
+      lowEnergy += lowpass * lowpass
+      highEnergy += high * high
+    }
+    loud[window] = 10 * Math.log10(sum / hop + 1e-10)
+    bright[window] = highEnergy / (lowEnergy + highEnergy + 1e-12)
   }
 
-  if (smooth.length - cuts[cuts.length - 1] < minGap && cuts.length > 1) cuts.pop()
-  cuts.push(smooth.length)
+  const onsets = onsetSeries(channel, sampleRate)
+  return {
+    hop: WINDOW,
+    duration: channel.length / sampleRate,
+    loud: smoothSeries(loud),
+    bright: smoothSeries(bright),
+    onset: smoothSeries(onsets.density),
+    onsetsPerSecond: onsets.perSecond,
+    flux: onsets.flux,
+    frameSec: onsets.frameSec,
+  }
+}
 
-  const hop = duration / smooth.length
-  const sections = cuts.slice(0, -1).map((start, index) => {
+function targetSectionCount(duration) {
+  const room = Math.max(1, Math.floor(duration / MIN_SECTION))
+  const scaled = Math.round((duration / 180) * 7)
+  const aimed = duration >= 24 ? Math.max(3, scaled) : Math.max(1, scaled)
+  return Math.max(1, Math.min(10, room, aimed))
+}
+
+function boundaryIndexes(features, floor = 0.9) {
+  const { loud, bright, onset, duration } = features
+  const count = loud.length
+  const radius = 6
+  const minGap = Math.round(MIN_SECTION / WINDOW)
+  if (count < minGap * 2) return []
+
+  const loudScale = Math.max(deviation(loud), 1.5)
+  const brightScale = Math.max(deviation(bright), 0.03)
+  const onsetScale = Math.max(deviation(onset), 0.35)
+  const spanMean = (series, from, to) => average(series.slice(Math.max(0, from), Math.min(series.length, to)))
+  const scores = new Array(count).fill(0)
+  for (let index = radius; index < count - radius; index += 1) {
+    const loudJump = Math.abs(spanMean(loud, index, index + radius) - spanMean(loud, index - radius, index))
+    const brightJump = Math.abs(spanMean(bright, index, index + radius) - spanMean(bright, index - radius, index))
+    const onsetJump = Math.abs(spanMean(onset, index, index + radius) - spanMean(onset, index - radius, index))
+    scores[index] = loudJump / loudScale + (brightJump / brightScale) * 0.7 + (onsetJump / onsetScale) * 0.85
+  }
+
+  const peaks = []
+  for (let index = radius + 1; index < count - radius - 1; index += 1) {
+    if (scores[index] < floor) continue
+    if (scores[index] < scores[index - 1] || scores[index] < scores[index + 1]) continue
+    if (index < minGap || index > count - minGap) continue
+    peaks.push({ index, score: scores[index] })
+  }
+  peaks.sort((left, right) => right.score - left.score)
+
+  const chosen = []
+  const limit = Math.max(0, Math.min(9, Math.floor(duration / MIN_SECTION) - 1))
+  for (const peak of peaks) {
+    if (chosen.length >= limit) break
+    if (chosen.some((index) => Math.abs(index - peak.index) < minGap)) continue
+    chosen.push(peak.index)
+  }
+  chosen.sort((left, right) => left - right)
+  return chosen
+}
+
+function rangesFromIndexes(indexes, duration) {
+  const cuts = [0, ...indexes.map((index) => index * WINDOW), duration]
+  const ranges = []
+  for (let index = 0; index < cuts.length - 1; index += 1) {
+    const start = cuts[index]
     const end = cuts[index + 1]
-    return {
-      start: start * hop,
-      end: end * hop,
-      label: sectionLabel(smooth.slice(start, end)),
+    if (end - start < 0.05) continue
+    if (ranges.length && end - start < MIN_SECTION) {
+      ranges[ranges.length - 1].end = end
+      continue
     }
+    ranges.push({ start, end })
+  }
+  if (!ranges.length) ranges.push({ start: 0, end: duration })
+  ranges[0].start = 0
+  ranges[ranges.length - 1].end = duration
+  return ranges
+}
+
+function barRanges(duration, bpm) {
+  const tempo = bpm > 0 ? bpm : 100
+  const bar = (60 / tempo) * 4
+  const eight = 8 * bar
+  const sixteen = 16 * bar
+  const fitting = (size) => (size >= MIN_SECTION ? Math.floor((duration + 0.001) / size) : 0)
+  const want = targetSectionCount(duration)
+  const choices = [
+    { size: sixteen, count: fitting(sixteen) },
+    { size: eight, count: fitting(eight) },
+  ].filter((choice) => choice.count >= 3)
+  const picked = choices.sort((left, right) => Math.abs(left.count - want) - Math.abs(right.count - want))[0]
+  const size = picked?.size ?? Math.max(sixteen, MIN_SECTION)
+  const cuts = []
+  for (let time = size; time < duration - MIN_SECTION + 0.001; time += size) cuts.push(time)
+  return rangesFromIndexes(cuts.map((time) => time / WINDOW), duration)
+}
+
+function songLevel(loud) {
+  const sorted = loud.slice().sort((left, right) => left - right)
+  const at = (percent) => sorted[Math.min(sorted.length - 1, Math.round(percent * (sorted.length - 1)))] ?? 0
+  const low = at(0.08)
+  const high = at(0.92)
+  const span = Math.max(1.2, high - low)
+  return loud.map((value) => Math.min(1, Math.max(0, (value - low) / span)))
+}
+
+function sliceStats(level, start, end, duration) {
+  const from = Math.max(0, Math.min(level.length - 1, Math.floor((start / duration) * level.length)))
+  const to = Math.max(from + 1, Math.min(level.length, Math.ceil((end / duration) * level.length)))
+  const slice = level.slice(from, to)
+  const head = slice.slice(0, Math.max(1, Math.floor(slice.length * 0.3)))
+  const tail = slice.slice(Math.floor(slice.length * 0.7))
+  return { mean: average(slice), rise: average(tail.length ? tail : slice) - average(head) }
+}
+
+function labelsFor(ranges, level, duration, energy) {
+  const stats = ranges.map((range) => sliceStats(level, range.start, range.end, duration))
+  const labels = stats.map((item, index) => {
+    const previous = stats[index - 1]
+    if (previous && previous.mean - item.mean >= 0.2 && item.mean < 0.72) return 'Drop'
+    if (item.rise >= 0.16 && item.mean < 0.8) return 'Build'
+    if (item.mean >= 0.64) return 'Peak'
+    if (item.mean <= 0.36) return 'Quiet'
+    if (item.rise >= 0.1) return 'Build'
+    if (item.rise <= -0.14) return 'Drop'
+    return item.mean >= 0.5 ? 'Peak' : 'Quiet'
   })
 
-  return sections.reduce((merged, section) => {
-    const previous = merged[merged.length - 1]
-    if (previous && previous.label === section.label) previous.end = section.end
-    else merged.push({ ...section })
-    return merged
-  }, [])
+  const last = labels.length - 1
+  if (
+    last > 0 &&
+    labels[last] !== 'Peak' &&
+    stats[last].mean < 0.72 &&
+    (stats[last].mean < stats[last - 1].mean || stats[last].rise < -0.05)
+  ) {
+    labels[last] = 'Outro'
+  }
+
+  const loudest = stats.reduce((best, item, index) => (item.mean > stats[best].mean ? index : best), 0)
+  const quietest = stats.reduce((best, item, index) => (item.mean < stats[best].mean ? index : best), 0)
+  const driving = energy === 'Driving' || energy === 'Intense'
+  const calm = energy === 'Calm' || energy === 'Mellow'
+
+  if (labels.length === 1) {
+    if (driving || energy === 'Steady') labels[0] = 'Peak'
+    else if (calm) labels[0] = 'Quiet'
+    return labels
+  }
+
+  if ((driving || energy === 'Steady') && labels.every((label) => label === 'Quiet' || label === 'Outro')) {
+    labels[loudest] = 'Peak'
+  }
+  if (driving && !labels.includes('Peak')) labels[loudest] = 'Peak'
+  if (driving && quietest !== loudest && !labels.includes('Quiet') && !labels.includes('Outro')) {
+    labels[quietest] = quietest === last ? 'Outro' : 'Quiet'
+  }
+  if (calm && labels.every((label) => label === 'Peak')) {
+    labels[quietest] = quietest === last ? 'Outro' : 'Quiet'
+  }
+  return labels
+}
+
+export function correctTempo(rawBpm, reading) {
+  if (rawBpm == null || !Number.isFinite(rawBpm) || rawBpm <= 0) return null
+  const onsetsPerSecond = typeof reading === 'number' ? reading : reading?.onsetsPerSecond || 0
+  const perBeat = onsetsPerSecond / (rawBpm / 60)
+  const flux = typeof reading === 'number' ? null : reading?.flux
+  const frameSec = reading?.frameSec || 0.02
+  let bpm = rawBpm
+  if (rawBpm < 75) {
+    const slow = pulseAt(flux, frameSec, rawBpm)
+    const fast = pulseAt(flux, frameSec, rawBpm * 2)
+    const clearlySlow = perBeat < 1.5 && fast < slow * 0.4
+    if (!clearlySlow) bpm = rawBpm * 2
+  } else if (rawBpm > 180) {
+    const fast = pulseAt(flux, frameSec, rawBpm)
+    const slow = pulseAt(flux, frameSec, rawBpm / 2)
+    const clearlyFast = perBeat >= 0.6 && fast >= slow * 0.4
+    if (!clearlyFast) bpm = rawBpm / 2
+  }
+  return Math.round(bpm)
+}
+
+export function beatCount(duration, bpm) {
+  if (bpm == null || !(duration > 0)) return null
+  return Math.max(1, Math.round((duration * bpm) / 60))
+}
+
+export function detectSections(channel, sampleRate, { bpm = null, energy = 'Steady' } = {}) {
+  const features = measureTrack(channel, sampleRate)
+  const duration = features.duration
+  const tempo = correctTempo(bpm, features)
+  let ranges = rangesFromIndexes(boundaryIndexes(features), duration)
+  if (ranges.length < 3 && duration >= MIN_SECTION * 3) {
+    ranges = rangesFromIndexes(boundaryIndexes(features, 0.62), duration)
+  }
+  if (ranges.length < 3 && duration >= MIN_SECTION * 3) ranges = barRanges(duration, tempo)
+  const labels = labelsFor(ranges, songLevel(features.loud), duration, energy)
+  return {
+    bpm: tempo,
+    onsetsPerSecond: features.onsetsPerSecond,
+    sections: ranges.map((range, index) => ({
+      start: range.start,
+      end: range.end,
+      label: labels[index],
+    })),
+  }
 }
 
 function brightnessOf(channel, sampleRate) {
@@ -148,7 +407,7 @@ function brightnessOf(channel, sampleRate) {
 async function tempoOf(audioBuffer) {
   try {
     const result = await Promise.race([
-      guess(audioBuffer, { minTempo: 60, maxTempo: 180 }),
+      guess(audioBuffer, { minTempo: 55, maxTempo: 210 }),
       new Promise((_, reject) => {
         setTimeout(() => reject(new Error('tempo timeout')), 20000)
       }),
@@ -189,17 +448,20 @@ export async function analyzeTrack(file) {
   const level = envelope.reduce((sum, value) => sum + value, 0) / envelope.length
   const energy = energyWord(level)
   const brightness = brightnessOf(channel, audioBuffer.sampleRate)
-  const bpm = await tempoOf(audioBuffer)
+  const rawBpm = await tempoOf(audioBuffer)
+  const read = detectSections(channel, audioBuffer.sampleRate, { bpm: rawBpm, energy })
+  const bpm = read.bpm
 
   return {
     fileName: file.name,
     duration: audioBuffer.duration,
     bpm,
+    beats: beatCount(audioBuffer.duration, bpm),
     energy,
     mood: moodWords({ energy, brightness, bpm }),
     brightness,
     bars,
-    sections: sectionsFromEnergy(envelope, audioBuffer.duration),
+    sections: read.sections,
     profile: profileFromChannel(channel, audioBuffer.sampleRate),
   }
 }

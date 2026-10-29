@@ -41,8 +41,10 @@ export function mountShapes(node, liveRef, sizeRef) {
         tempo: live.tempo || 100,
         roundness: live.roundness ?? 0.7,
         colors: live.colors,
+        palette: live.palette,
         sections: live.sections,
         seeds: live.seeds,
+        edits: live.edits,
         profile: live.profile,
         sectionLabel: live.sectionLabel,
       })

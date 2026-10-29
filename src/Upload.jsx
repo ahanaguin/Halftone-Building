@@ -38,6 +38,8 @@ export function Upload() {
   const [audioUrl, setAudioUrl] = useState('')
   const [shown, setShown] = useState(track)
   const [closing, setClosing] = useState(false)
+  const [debug, setDebug] = useState(false)
+  const [beatNow, setBeatNow] = useState(0)
   const closeTimer = useRef(0)
   const trackRef = useRef(track)
   trackRef.current = track
@@ -63,6 +65,32 @@ export function Upload() {
   }, [track])
 
   useEffect(() => () => window.clearTimeout(closeTimer.current), [])
+
+  useEffect(() => {
+    function onKey(event) {
+      if (event.key !== 'd' && event.key !== 'D') return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const tag = event.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) return
+      event.preventDefault()
+      setDebug((open) => !open)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    if (!debug) return undefined
+    let frame = 0
+    const tick = () => {
+      const time = audioRef.current?.currentTime || 0
+      const bpm = shown?.bpm
+      setBeatNow(bpm ? Math.floor((time * bpm) / 60) + 1 : 0)
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [debug, shown?.bpm, playing])
 
   async function accept(file) {
     audioRef.current?.pause()
@@ -247,6 +275,14 @@ export function Upload() {
               </div>
             </section>
           </div>
+        ) : null}
+
+        {debug && shown ? (
+          <aside className="debug-panel">
+            <span>Beats</span>
+            <strong>{shown.beats ?? '—'}</strong>
+            <span>{playing ? `Now ${beatNow}` : 'Press play to count along'}</span>
+          </aside>
         ) : null}
 
         <div className="upload-actions">

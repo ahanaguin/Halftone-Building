@@ -2,17 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   MAX_SWATCHES,
-  applySectionPreset,
   artworkColor,
   hexToRgb,
   paletteColors,
-  paletteForSection,
   rgbToHsl,
   shiftUnlocked,
   swatchHex,
 } from './palette.js'
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
-import { explainPoster, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { SHAPE_RANGE, explainPoster, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { useTrack } from './track.jsx'
 
@@ -75,6 +73,8 @@ export function Studio() {
   const profileRef = useRef(track?.profile ?? null)
   const studioRef = useRef(studio)
   const slideOrigin = useRef(null)
+  const placeDrag = useRef(null)
+  const playToggle = useRef(null)
   const sizeRef = useRef(size)
   const liveRef = useRef({
     loud: 0.35,
@@ -88,6 +88,8 @@ export function Studio() {
     colors: paletteColors(studio.palette),
     sections: track?.sections || [],
     seeds: studio.seeds,
+    edits: studio.edits || {},
+    palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
     profile: profileRef.current,
     sectionLabel: '',
   })
@@ -107,6 +109,8 @@ export function Studio() {
     seed: studio.seeds[activeKey] ?? liveRef.current.seed,
     sections: track?.sections || [],
     seeds: studio.seeds,
+    edits: studio.edits || {},
+    palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
     profile: profileRef.current,
     sectionLabel: section?.label || '',
   }
@@ -151,16 +155,6 @@ export function Studio() {
       cancel = true
     }
   }, [track])
-
-  useEffect(() => {
-    const label = section?.label
-    if (!label) return
-    syncStudio((current) => {
-      if (current.palette.source === 'custom') return current
-      const palette = applySectionPreset(current.palette, paletteForSection(label))
-      return palette === current.palette ? current : { ...current, palette }
-    })
-  }, [section, syncStudio])
 
   useEffect(() => {
     const slot = slotRef.current
@@ -212,6 +206,8 @@ export function Studio() {
         live.seed = studioNow.seeds[key] ?? 1
         live.sections = currentTrack.sections || []
         live.seeds = studioNow.seeds
+        live.edits = studioNow.edits || {}
+        live.palette = (studioNow.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) }))
         live.profile = profile
         live.sectionLabel = next?.label || ''
         const shown = pickRecipe(live.seed, live.sectionLabel || 'Quiet', live.roundness ?? 0.7)
@@ -273,6 +269,25 @@ export function Studio() {
       setPlaying(false)
     }
   }
+
+  playToggle.current = togglePlay
+
+  useEffect(() => {
+    function onKey(event) {
+      if (event.code !== 'Space' || event.repeat) return
+      const target = event.target
+      const tag = target?.tagName
+      if (tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return
+      if (tag === 'INPUT') {
+        const type = (target.type || 'text').toLowerCase()
+        if (['text', 'search', 'email', 'url', 'password', 'number', 'color'].includes(type)) return
+      }
+      event.preventDefault()
+      playToggle.current?.()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   function seek(event) {
     const audio = audioRef.current
@@ -396,6 +411,80 @@ export function Studio() {
     }))
   }
 
+  function writeSection(patch) {
+    if (!section) return
+    const key = sectionKey(section)
+    const apply = (current) => {
+      const previous = current.edits?.[key] || {}
+      if (Object.keys(patch).every((name) => previous[name] === patch[name])) return current
+      return { ...current, edits: { ...(current.edits || {}), [key]: { ...previous, ...patch } } }
+    }
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
+  function onSectionSize(event) {
+    writeSection({ size: Number(event.target.value) })
+  }
+
+  function onSectionCount(event) {
+    writeSection({ count: Number(event.target.value) })
+  }
+
+  function onSectionColor(id) {
+    const ids = studio.palette.swatches.map((swatch) => swatch.id)
+    const saved = studio.edits?.[activeKey]?.colors
+    const current = saved?.length >= 2 ? ids.filter((item) => saved.includes(item)) : ids
+    const next = current.includes(id)
+      ? current.filter((item) => item !== id)
+      : ids.filter((item) => current.includes(item) || item === id)
+    if (next.length < 2) return
+    writeSection({ colors: next.length === ids.length ? null : next })
+  }
+
+  function resetSection() {
+    if (!section) return
+    const key = sectionKey(section)
+    editStudio((current) => {
+      if (!current.edits?.[key]) return current
+      const edits = { ...current.edits }
+      delete edits[key]
+      return { ...current, edits }
+    })
+  }
+
+  function onPlaceDown(event) {
+    if (!section || event.button !== 0) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const edit = studioRef.current.edits?.[sectionKey(section)] || {}
+    slideOrigin.current = studioRef.current
+    placeDrag.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      width: Math.max(1, rect.width),
+      height: Math.max(1, rect.height),
+      originX: edit.x || 0,
+      originY: edit.y || 0,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function onPlaceMove(event) {
+    const drag = placeDrag.current
+    if (!drag || event.pointerId !== drag.id) return
+    writeSection({
+      x: Math.min(0.42, Math.max(-0.42, drag.originX + (event.clientX - drag.x) / drag.width)),
+      y: Math.min(0.42, Math.max(-0.42, drag.originY + (event.clientY - drag.y) / drag.height)),
+    })
+  }
+
+  function onPlaceUp(event) {
+    if (!placeDrag.current || event.pointerId !== placeDrag.current.id) return
+    placeDrag.current = null
+    finishSlide()
+  }
+
   useEffect(() => {
     const index = section && track?.sections
       ? track.sections.findIndex((item) => item.start === section.start && item.label === section.label)
@@ -410,6 +499,17 @@ export function Studio() {
   const lightness = Math.round(studio.palette.lightness * 100)
   const spiky = Math.round((1 - studio.roundness) * 100)
   const shapesOn = studio.style === 'shapes'
+  const sectionEdit = studio.edits?.[activeKey] || {}
+  const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
+  const sizeValue = sectionEdit.size ?? 50
+  const countValue = Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
+  const enabledColors =
+    sectionEdit.colors?.length >= 2
+      ? studio.palette.swatches.filter((swatch) => sectionEdit.colors.includes(swatch.id)).map((swatch) => swatch.id)
+      : studio.palette.swatches.map((swatch) => swatch.id)
+  const sectionEdited = Boolean(
+    sectionEdit.size != null || sectionEdit.count != null || sectionEdit.colors?.length >= 2 || sectionEdit.x || sectionEdit.y,
+  )
 
   return (
     <main className="studio">
@@ -432,8 +532,12 @@ export function Studio() {
           <div className="canvas-frame" style={{ height: size.frame }}>
             <div
               ref={holderRef}
-              className="canvas-stage"
+              className={track && shapesOn ? 'canvas-stage can-place' : 'canvas-stage'}
               style={{ width: size.w, height: size.h, background: shapesOn ? '#111111' : artwork }}
+              onPointerDown={track && shapesOn ? onPlaceDown : undefined}
+              onPointerMove={onPlaceMove}
+              onPointerUp={onPlaceUp}
+              onPointerCancel={onPlaceUp}
               role={track && shapesOn ? 'img' : undefined}
               aria-label={track && shapesOn ? 'Shapes reacting to the track' : undefined}
             />
@@ -617,8 +721,68 @@ export function Studio() {
           aria-label="Round to spiky"
         />
 
+        {section && shapesOn ? (
+          <div className="section-tools">
+            <p className="side-label">This section</p>
+            <div className="slider-labels">
+              <span>Shape size</span>
+            </div>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="100"
+              value={sizeValue}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={onSectionSize}
+              aria-label="Shape size"
+            />
+            <div className="slider-labels">
+              <span>Number of shapes</span>
+              <span>{countValue}</span>
+            </div>
+            <input
+              className="range"
+              type="range"
+              min={shapeRange.min}
+              max={shapeRange.max}
+              step="1"
+              value={countValue}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={onSectionCount}
+              aria-label="Number of shapes"
+            />
+            <p className="side-label">Colors for this section</p>
+            <div className="section-colors">
+              {studio.palette.swatches.map((swatch, index) => {
+                const checked = enabledColors.includes(swatch.id)
+                return (
+                  <label className="section-color" key={swatch.id}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={checked && enabledColors.length <= 2}
+                      aria-label={`Use color ${index + 1} in this section`}
+                      onChange={() => onSectionColor(swatch.id)}
+                    />
+                    <span style={{ background: swatchHex(swatch) }} />
+                  </label>
+                )
+              })}
+            </div>
+            <p className="section-note">Drag the picture to move the main shape.</p>
+          </div>
+        ) : null}
+
         <div className="redo">
           <p>{section ? `${section.label} selected` : 'Section'}</p>
+          <button type="button" className="button-redo" disabled={!section || !sectionEdited} onClick={resetSection}>
+            Reset section
+          </button>
           <button type="button" className="button-redo" disabled={!section} onClick={redoSection}>
             Redo this section
           </button>

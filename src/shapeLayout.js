@@ -289,12 +289,50 @@ export function pickGround(colors, seed) {
   return INK_BLACK
 }
 
+export const SHAPE_RANGE = {
+  eclipse: { min: 2, max: 5, count: 3 },
+  beam: { min: 2, max: 6, count: 3 },
+  diagonal: { min: 2, max: 4, count: 2 },
+  burst: { min: 3, max: 8, count: 6 },
+  grid: { min: 4, max: 16, count: 16 },
+}
+
+export function shapeScale(size) {
+  if (size == null) return 1
+  return 0.62 + (Math.min(100, Math.max(0, size)) / 100) * 0.76
+}
+
+export function shapeCount(recipe, count) {
+  const range = SHAPE_RANGE[recipe] || SHAPE_RANGE.eclipse
+  const value = count == null ? range.count : count
+  return Math.min(range.max, Math.max(range.min, Math.round(value)))
+}
+
+export function leadColors(entries, sectionIndex, selectedIds) {
+  const source = (entries || []).filter((entry) => entry?.hex)
+  let enabled = source
+  if (selectedIds?.length >= 2) {
+    const picked = source.filter((entry) => selectedIds.includes(entry.id))
+    if (picked.length >= 2) enabled = picked
+  }
+  if (enabled.length < 2) {
+    return source.length ? source.map((entry) => entry.hex) : ['#ff4d8d', '#ffd23a']
+  }
+  const lead = ((sectionIndex % enabled.length) + enabled.length) % enabled.length
+  return [...enabled.slice(lead), ...enabled.slice(0, lead)].map((entry) => entry.hex)
+}
+
 export function posterStyle(colors, seed) {
-  let ground = pickGround(colors, seed)
+  const lead = colors?.[0]
+  const groundPool = (colors || []).filter((hex) => !sameHex(hex, lead))
+  let ground = pickGround(groundPool.length ? groundPool : colors, seed)
+  if (lead && sameHex(ground, lead)) ground = PAPER
   let inks = pickInks(colors, seed).filter((hex) => !sameHex(hex, ground))
+  if (lead && !sameHex(lead, ground)) inks = [lead, ...inks.filter((hex) => !sameHex(hex, lead))]
   if (inks.length < 2) {
     ground = sameHex(ground, PAPER) ? INK_BLACK : PAPER
     inks = pickInks(colors, seed).filter((hex) => !sameHex(hex, ground))
+    if (lead && !sameHex(lead, ground)) inks = [lead, ...inks.filter((hex) => !sameHex(hex, lead))]
   }
   if (inks.length < 2) inks = pickInks(colors, seed).slice(0, 3)
   return {

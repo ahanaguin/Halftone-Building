@@ -1,8 +1,9 @@
-import { paletteColors } from './palette.js'
+import { paletteColors, swatchHex } from './palette.js'
 import { drawPoster } from './posters.js'
 import { metricsAt } from './profileTrack.js'
 import {
   SECTION_BLEND,
+  leadColors,
   motionAt,
   posterStyle,
   previousSection,
@@ -10,6 +11,8 @@ import {
   sectionAt,
   sectionKey,
   sectionSeed,
+  shapeCount,
+  shapeScale,
 } from './shapeLayout.js'
 
 const buffers = [null, null]
@@ -87,14 +90,26 @@ function seedFor(spec, section, sections) {
   return spec.seed || sectionSeed(section, index)
 }
 
+function paletteEntries(spec) {
+  if (spec.palette?.length) return spec.palette
+  return (spec.colors || []).map((hex) => ({ id: hex, hex }))
+}
+
 function describe(spec, section, sections) {
   const seed = seedFor(spec, section, sections)
   const recipe = pickRecipe(seed, section?.label || spec.sectionLabel || 'Quiet', spec.roundness ?? 0.7)
-  const style = posterStyle(spec.colors, seed)
+  const index = Math.max(0, sections.findIndex((item) => item.start === section?.start && item.label === section?.label))
+  const edit = section ? spec.edits?.[sectionKey(section)] : null
+  const colors = leadColors(paletteEntries(spec), index, edit?.colors)
+  const style = posterStyle(colors, seed)
   return {
     recipe,
     seed,
     ...style,
+    count: shapeCount(recipe, edit?.count),
+    scale: shapeScale(edit?.size),
+    offsetX: edit?.x || 0,
+    offsetY: edit?.y || 0,
     motion: motionAt({
       profile: spec.profile,
       time: spec.time || 0,
@@ -148,11 +163,13 @@ export function frameInput({ track, studio, profile, time, width, height }) {
     time,
     seed: studio.seeds?.[key] ?? (section ? sectionSeed(section, Math.max(0, index)) : 1),
     seeds: studio.seeds || {},
+    edits: studio.edits || {},
     sections,
     profile,
     roundness: studio.roundness ?? 0.7,
     tempo: track?.bpm ?? 100,
     colors,
+    palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
     sectionLabel: section?.label || '',
     loud: metrics.loud,
     bass: metrics.bass,
