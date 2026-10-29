@@ -17,7 +17,7 @@ import { useTrack } from './track.jsx'
 
 const FORMATS = ['9:16', '1:1', '16:9']
 const STYLES = [
-  { id: 'shapes', label: 'Shapes', ready: true },
+  { id: 'shapes', label: 'Liquid', ready: true },
   { id: 'halftone', label: 'Halftone', ready: false },
   { id: 'bars', label: 'Bars', ready: false },
   { id: 'wave', label: 'Wave', ready: false },
@@ -443,6 +443,10 @@ export function Studio() {
     writeSection({ count: Number(event.target.value) })
   }
 
+  function onComposition(event) {
+    writeSection({ composition: event.target.value })
+  }
+
   function onPerColor(event) {
     const per = Number(event.target.value)
     const groups = Math.max(1, enabledColors.length)
@@ -541,8 +545,14 @@ export function Studio() {
   const perMax = Math.min(8, Math.max(4, Math.floor(32 / colorGroups)))
   const perColor = Math.min(perMax, Math.max(4, Math.round(countValue / colorGroups)))
   const tune = { ...TUNE_DEFAULTS, ...(studio.tune || {}) }
+  const composition = ['free', 'mirror', 'quad', 'radial'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
   const sectionEdited = Boolean(
-    sectionEdit.size != null || sectionEdit.count != null || sectionEdit.colors?.length >= 2 || sectionEdit.x || sectionEdit.y,
+    sectionEdit.size != null ||
+      sectionEdit.count != null ||
+      sectionEdit.colors?.length >= 2 ||
+      sectionEdit.x ||
+      sectionEdit.y ||
+      (sectionEdit.composition && sectionEdit.composition !== 'auto'),
   )
 
   return (
@@ -573,11 +583,11 @@ export function Studio() {
               onPointerUp={onPlaceUp}
               onPointerCancel={onPlaceUp}
               role={track && shapesOn ? 'img' : undefined}
-              aria-label={track && shapesOn ? 'Shapes reacting to the track' : undefined}
+              aria-label={track && shapesOn ? 'Liquid reacting to the track' : undefined}
             />
             {track && shapesOn ? null : (
               <div className="canvas-empty">
-                {track ? <p>Coming soon</p> : <p>Upload a track to see shapes.</p>}
+                {track ? <p>Coming soon</p> : <p>Upload a track to see liquid.</p>}
                 {track ? null : (
                   <Link className="text-link" to="/upload">
                     Go to upload
@@ -673,6 +683,27 @@ export function Studio() {
             ))}
           </select>
         </label>
+
+        {shapesOn ? (
+          <>
+            <p className="side-label">Composition</p>
+            <label className="style-field">
+              <select
+                className="style-select"
+                aria-label="Composition"
+                value={composition}
+                disabled={!section}
+                onChange={onComposition}
+              >
+                <option value="auto">Auto</option>
+                <option value="free">Free</option>
+                <option value="mirror">Mirror</option>
+                <option value="quad">Quad</option>
+                <option value="radial">Radial</option>
+              </select>
+            </label>
+          </>
+        ) : null}
 
         <p className="side-label">Palette</p>
         <div className="swatches">
@@ -932,6 +963,42 @@ export function Studio() {
               onPointerCancel={finishSlide}
               onChange={(event) => onTune('drift', event)}
               aria-label="Drift speed"
+            />
+          </label>
+          <label>
+            <span>
+              Fold blend <strong>{tune.fold.toFixed(2)}</strong>
+            </span>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={tune.fold}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={(event) => onTune('fold', event)}
+              aria-label="Fold blend"
+            />
+          </label>
+          <label>
+            <span>
+              Rotation speed <strong>{tune.spin.toFixed(2)}</strong>
+            </span>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="2"
+              step="0.01"
+              value={tune.spin}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={(event) => onTune('spin', event)}
+              aria-label="Rotation speed"
             />
           </label>
         </aside>

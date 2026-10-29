@@ -743,6 +743,10 @@ h1 {
   appearance: none;
 }
 
+.style-select:disabled {
+  color: var(--muted);
+}
+
 .style-field::after {
   content: "";
   position: absolute;

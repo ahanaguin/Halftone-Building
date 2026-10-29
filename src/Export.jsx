@@ -18,7 +18,7 @@ import { useTrack } from './track.jsx'
 import { saveVisual } from './visuals.js'
 
 const STYLE_LABELS = {
-  shapes: 'Shapes',
+  shapes: 'Liquid',
   halftone: 'Halftone',
   bars: 'Bars',
   wave: 'Wave',
@@ -102,7 +102,7 @@ export function Export() {
   const bounds = section && track ? lengthBounds(section.start, track.duration) : { min: 3, max: 8 }
   const loopLength = Math.min(bounds.max, Math.max(bounds.min, length))
   const selectedCount = Number(loopOn) + Number(coverOn) + Number(filmOn)
-  const styleLabel = STYLE_LABELS[studio.style] || 'Shapes'
+  const styleLabel = STYLE_LABELS[studio.style] || 'Liquid'
 
   const loopSpec = useMemo(() => {
     if (!track || !section) return null
