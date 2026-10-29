@@ -343,5 +343,5 @@ export function posterStyle(colors, seed) {
 }
 
 export function explainPoster() {
-  return 'Soft blobs drift, merge, and split. Bass swells them, beats pop a small one off or pull it back in, and a new section travels into place unless it is a drop.'
+  return 'Same-color blobs merge into one liquid shape. Bass draws them together, bright hits let a droplet drift off, and louder passages melt the edges a little fuller. A new section eases the pull instead of cutting.'
 }

@@ -1,19 +1,7 @@
 import { paletteColors, swatchHex } from './palette.js'
-import { drawPoster } from './posters.js'
+import { paintMetaballs } from './metaballs.js'
 import { metricsAt } from './profileTrack.js'
-import {
-  PAPER,
-  SECTION_BLEND,
-  leadColors,
-  motionAt,
-  previousSection,
-  pickRecipe,
-  sectionAt,
-  sectionKey,
-  sectionSeed,
-  shapeCount,
-  shapeScale,
-} from './shapeLayout.js'
+import { sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 
 let grainCanvas = null
 
@@ -44,7 +32,7 @@ function paintGrain(ctx, width, height) {
   const transform = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null
   ctx.save()
   ctx.globalCompositeOperation = 'overlay'
-  ctx.globalAlpha = 0.2
+  ctx.globalAlpha = 0.12
   ctx.fillStyle = ctx.createPattern(grainSource(), 'repeat')
   if (transform) {
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -55,82 +43,13 @@ function paintGrain(ctx, width, height) {
   ctx.restore()
 }
 
-function smoothstep(amount) {
-  const t = Math.min(1, Math.max(0, amount))
-  return t * t * (3 - 2 * t)
-}
-
-function sectionList(spec) {
-  if (spec.sections?.length) return spec.sections
-  return [{ start: 0, end: Number.POSITIVE_INFINITY, label: spec.sectionLabel || 'Quiet' }]
-}
-
-function seedFor(spec, section, sections) {
-  if (!section) return spec.seed || 1
-  const key = sectionKey(section)
-  if (spec.seeds && spec.seeds[key] != null) return spec.seeds[key]
-  const index = Math.max(0, sections.findIndex((item) => item.start === section.start && item.label === section.label))
-  return spec.seed || sectionSeed(section, index)
-}
-
-function paletteEntries(spec) {
-  if (spec.palette?.length) return spec.palette
-  return (spec.colors || []).map((hex) => ({ id: hex, hex }))
-}
-
-function describe(spec, section, sections) {
-  const seed = seedFor(spec, section, sections)
-  const recipe = pickRecipe(seed, section?.label || spec.sectionLabel || 'Quiet', spec.roundness ?? 0.7)
-  const index = Math.max(0, sections.findIndex((item) => item.start === section?.start && item.label === section?.label))
-  const edit = section ? spec.edits?.[sectionKey(section)] : null
-  const colors = leadColors(paletteEntries(spec), index, edit?.colors)
-  return {
-    recipe,
-    seed,
-    ground: PAPER,
-    inks: colors,
-    roundness: spec.roundness ?? 0.7,
-    count: shapeCount(recipe, edit?.count),
-    scale: shapeScale(edit?.size),
-    offsetX: edit?.x || 0,
-    offsetY: edit?.y || 0,
-    motion: motionAt({
-      profile: spec.profile,
-      time: spec.time || 0,
-      tempo: spec.tempo || 100,
-      seed,
-      section,
-    }),
-  }
-}
-
 export function paintFrame(ctx, spec) {
   const width = spec.width
   const height = spec.height
-  const sections = sectionList(spec)
-  const section = sectionAt(sections, spec.time || 0) || sections[0]
-  const current = describe(spec, section, sections)
-  const elapsed = (spec.time || 0) - (section?.start || 0)
-  const previous = previousSection(sections, section)
-  const hardCut = section?.label === 'Drop'
-  const blending = !hardCut && previous && current && elapsed >= 0 && elapsed < SECTION_BLEND
-  const blend = blending ? smoothstep(elapsed / SECTION_BLEND) : 1
-
   ctx.save()
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
-  if (blending && blend < 1) {
-    const outgoing = describe({ ...spec, time: Math.max(0, section.start - 0.001) }, previous, sections)
-    drawPoster(ctx, {
-      ...current,
-      width,
-      height,
-      morphFrom: { ...outgoing, width, height },
-      morph: blend,
-    })
-  } else {
-    drawPoster(ctx, { ...current, width, height })
-  }
+  paintMetaballs(ctx, spec)
   paintGrain(ctx, width, height)
   ctx.restore()
 }
