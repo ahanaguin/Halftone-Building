@@ -390,6 +390,38 @@ a {
   letter-spacing: -0.02em;
 }
 
+.tune-panel {
+  width: 248px;
+}
+
+.tune-title {
+  margin: 0;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tune-panel label {
+  display: block;
+  margin-top: 14px;
+}
+
+.tune-panel label span {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tune-panel label strong {
+  display: inline;
+  margin: 0;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .upload-actions {
   display: flex;
   align-items: center;

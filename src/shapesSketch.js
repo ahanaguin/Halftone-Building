@@ -47,6 +47,7 @@ export function mountShapes(node, liveRef, sizeRef) {
         edits: live.edits,
         profile: live.profile,
         sectionLabel: live.sectionLabel,
+        tune: live.tune,
       })
     }
   }

@@ -289,11 +289,11 @@ export function pickGround(colors, seed) {
 }
 
 export const SHAPE_RANGE = {
-  eclipse: { min: 2, max: 8, count: 6 },
-  beam: { min: 2, max: 8, count: 5 },
-  diagonal: { min: 2, max: 8, count: 5 },
-  burst: { min: 2, max: 8, count: 7 },
-  grid: { min: 2, max: 8, count: 6 },
+  eclipse: { min: 8, max: 32, count: 18 },
+  beam: { min: 8, max: 32, count: 18 },
+  diagonal: { min: 8, max: 32, count: 18 },
+  burst: { min: 8, max: 32, count: 18 },
+  grid: { min: 8, max: 32, count: 18 },
 }
 
 export function shapeScale(size) {

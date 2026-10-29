@@ -12,6 +12,7 @@ import {
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
 import { SHAPE_RANGE, explainPoster, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
+import { TUNE_DEFAULTS } from './metaballs.js'
 import { useTrack } from './track.jsx'
 
 const FORMATS = ['9:16', '1:1', '16:9']
@@ -63,6 +64,7 @@ export function Studio() {
   const posterRef = useRef('eclipse')
   const [audioUrl, setAudioUrl] = useState('')
   const [size, setSize] = useState({ w: 640, h: 360, frame: 420 })
+  const [tuneOpen, setTuneOpen] = useState(false)
   const slotRef = useRef(null)
   const sideRef = useRef(null)
   const holderRef = useRef(null)
@@ -92,6 +94,7 @@ export function Studio() {
     palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
     profile: profileRef.current,
     sectionLabel: '',
+    tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
   })
 
   studioRef.current = studio
@@ -113,6 +116,7 @@ export function Studio() {
     palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
     profile: profileRef.current,
     sectionLabel: section?.label || '',
+    tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
   }
 
   useEffect(() => {
@@ -210,6 +214,7 @@ export function Studio() {
         live.palette = (studioNow.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) }))
         live.profile = profile
         live.sectionLabel = next?.label || ''
+        live.tune = { ...TUNE_DEFAULTS, ...(studioNow.tune || {}) }
         const shown = pickRecipe(live.seed, live.sectionLabel || 'Quiet', live.roundness ?? 0.7)
         if (shown !== posterRef.current) {
           posterRef.current = shown
@@ -274,14 +279,21 @@ export function Studio() {
 
   useEffect(() => {
     function onKey(event) {
-      if (event.code !== 'Space' || event.repeat) return
+      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
       const target = event.target
       const tag = target?.tagName
-      if (tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return
-      if (tag === 'INPUT') {
-        const type = (target.type || 'text').toLowerCase()
-        if (['text', 'search', 'email', 'url', 'password', 'number', 'color'].includes(type)) return
+      const typing =
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target?.isContentEditable ||
+        (tag === 'INPUT' && ['text', 'search', 'email', 'url', 'password', 'number', 'color'].includes((target.type || 'text').toLowerCase()))
+      if (event.code === 'KeyT') {
+        if (typing) return
+        event.preventDefault()
+        setTuneOpen((open) => !open)
+        return
       }
+      if (event.code !== 'Space' || typing) return
       event.preventDefault()
       playToggle.current?.()
     }
@@ -431,6 +443,24 @@ export function Studio() {
     writeSection({ count: Number(event.target.value) })
   }
 
+  function onPerColor(event) {
+    const per = Number(event.target.value)
+    const groups = Math.max(1, enabledColors.length)
+    const total = Math.min(shapeRange.max, Math.max(shapeRange.min, per * groups))
+    writeSection({ count: total })
+  }
+
+  function onTune(key, event) {
+    const value = Number(event.target.value)
+    const apply = (current) => {
+      const tune = { ...TUNE_DEFAULTS, ...current.tune }
+      if (tune[key] === value) return current
+      return { ...current, tune: { ...tune, [key]: value } }
+    }
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
   function onSectionColor(id) {
     const ids = studio.palette.swatches.map((swatch) => swatch.id)
     const saved = studio.edits?.[activeKey]?.colors
@@ -507,6 +537,10 @@ export function Studio() {
     sectionEdit.colors?.length >= 2
       ? studio.palette.swatches.filter((swatch) => sectionEdit.colors.includes(swatch.id)).map((swatch) => swatch.id)
       : studio.palette.swatches.map((swatch) => swatch.id)
+  const colorGroups = Math.max(1, enabledColors.length)
+  const perMax = Math.min(8, Math.max(4, Math.floor(32 / colorGroups)))
+  const perColor = Math.min(perMax, Math.max(4, Math.round(countValue / colorGroups)))
+  const tune = { ...TUNE_DEFAULTS, ...(studio.tune || {}) }
   const sectionEdited = Boolean(
     sectionEdit.size != null || sectionEdit.count != null || sectionEdit.colors?.length >= 2 || sectionEdit.x || sectionEdit.y,
   )
@@ -788,6 +822,120 @@ export function Studio() {
           </button>
         </div>
       </aside>
+      {tuneOpen ? (
+        <aside className="debug-panel tune-panel" aria-label="Tuning">
+          <p className="tune-title">Tuning</p>
+          <label>
+            <span>
+              Blobs per color <strong>{perColor}</strong>
+            </span>
+            <input
+              className="range"
+              type="range"
+              min="4"
+              max={perMax}
+              step="1"
+              value={perColor}
+              disabled={!section || !shapesOn}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={onPerColor}
+              aria-label="Blobs per color"
+            />
+          </label>
+          <label>
+            <span>
+              Field falloff <strong>{tune.falloff.toFixed(2)}</strong>
+            </span>
+            <input
+              className="range"
+              type="range"
+              min="1"
+              max="4"
+              step="0.05"
+              value={tune.falloff}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={(event) => onTune('falloff', event)}
+              aria-label="Field falloff"
+            />
+          </label>
+          <label>
+            <span>
+              Threshold <strong>{tune.threshold.toFixed(2)}</strong>
+            </span>
+            <input
+              className="range"
+              type="range"
+              min="0.4"
+              max="1.6"
+              step="0.01"
+              value={tune.threshold}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={(event) => onTune('threshold', event)}
+              aria-label="Threshold"
+            />
+          </label>
+          <label>
+            <span>
+              Opacity <strong>{Math.round(tune.opacity * 100)}%</strong>
+            </span>
+            <input
+              className="range"
+              type="range"
+              min="0.4"
+              max="1"
+              step="0.01"
+              value={tune.opacity}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={(event) => onTune('opacity', event)}
+              aria-label="Opacity"
+            />
+          </label>
+          <label>
+            <span>
+              Attraction <strong>{tune.attract.toFixed(2)}</strong>
+            </span>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="2"
+              step="0.01"
+              value={tune.attract}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={(event) => onTune('attract', event)}
+              aria-label="Attraction strength"
+            />
+          </label>
+          <label>
+            <span>
+              Drift speed <strong>{tune.drift.toFixed(2)}</strong>
+            </span>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="2"
+              step="0.01"
+              value={tune.drift}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={(event) => onTune('drift', event)}
+              aria-label="Drift speed"
+            />
+          </label>
+        </aside>
+      ) : null}
     </main>
   )
 }

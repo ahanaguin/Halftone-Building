@@ -1,5 +1,5 @@
 import { paletteColors, swatchHex } from './palette.js'
-import { paintMetaballs } from './metaballs.js'
+import { paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
 import { metricsAt } from './profileTrack.js'
 import { sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 
@@ -74,6 +74,7 @@ export function frameInput({ track, studio, profile, time, width, height }) {
     tempo: track?.bpm ?? 100,
     colors,
     palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
+    tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
     sectionLabel: section?.label || '',
     loud: metrics.loud,
     bass: metrics.bass,

@@ -1,4 +1,4 @@
-import { hexToRgb } from './palette.js'
+import { hexToRgb, hslToHex, rgbToHsl } from './palette.js'
 import { metricsAt } from './profileTrack.js'
 import {
   PAPER,
@@ -17,16 +17,20 @@ import {
 const DT = 1 / 30
 const AUDIO_TAU = 0.3
 const SECTION_TAU = 1.15
-const BLOBS = [
-  { x: -0.18, y: 0.02, r: 0.16, group: 0, parent: 0, droplet: false },
-  { x: 0.1, y: -0.14, r: 0.13, group: 1, parent: 1, droplet: false },
-  { x: 0.2, y: 0.12, r: 0.12, group: 2, parent: 2, droplet: false },
-  { x: -0.02, y: 0.15, r: 0.09, group: 0, parent: 0, droplet: false },
-  { x: 0.2, y: -0.02, r: 0.085, group: 1, parent: 1, droplet: false },
-  { x: -0.14, y: 0.05, r: 0.055, group: 0, parent: 0, droplet: true },
-  { x: 0.12, y: -0.1, r: 0.048, group: 1, parent: 1, droplet: true },
-  { x: 0.16, y: 0.08, r: 0.044, group: 2, parent: 2, droplet: true },
-]
+const GROUPS = 8
+const PER_GROUP = 8
+const MAX_BLOBS = 32
+const SIZES = [0.056, 0.044, 0.032, 0.022, 0.018, 0.015, 0.013, 0.011]
+const PAPER_RGB = hexToRgb(PAPER).map((channel) => channel / 255)
+
+export const TUNE_DEFAULTS = {
+  perColor: 6,
+  falloff: 2.7,
+  threshold: 0.82,
+  opacity: 0.8,
+  attract: 1,
+  drift: 1,
+}
 
 const VERT = `#version 300 es
 void main() {
@@ -38,43 +42,41 @@ const FRAG = `#version 300 es
 precision highp float;
 uniform vec2 uResolution;
 uniform float uThreshold;
-uniform float uSoftness;
+uniform float uFalloff;
+uniform float uOpacity;
 uniform int uCount;
-uniform vec4 uBlobs[8];
-uniform vec3 uColors[4];
+uniform int uGroups;
+uniform vec4 uBlobs[32];
+uniform vec3 uColors[8];
+uniform vec3 uPaper;
 out vec4 outColor;
 
 float edgeOf(float field) {
-  float width = fwidth(field) + uSoftness;
+  float width = max(fwidth(field) * 0.625, 0.0001);
   return smoothstep(uThreshold - width, uThreshold + width, field);
 }
 
 void main() {
   vec2 p = gl_FragCoord.xy;
   p.y = uResolution.y - p.y;
-  float field0 = 0.0;
-  float field1 = 0.0;
-  float field2 = 0.0;
-  float field3 = 0.0;
-  for (int i = 0; i < 8; i++) {
+  float fields[8];
+  for (int group = 0; group < 8; group++) fields[group] = 0.0;
+  for (int i = 0; i < 32; i++) {
     if (i >= uCount) break;
     float radius = uBlobs[i].z;
     if (radius < 0.5) continue;
     vec2 delta = p - uBlobs[i].xy;
     float dist2 = max(dot(delta, delta), 0.35);
-    float add = (radius * radius) / dist2;
+    float add = uFalloff * (radius * radius) / dist2;
     int group = int(uBlobs[i].w + 0.5);
-    if (group == 0) field0 += add;
-    else if (group == 1) field1 += add;
-    else if (group == 2) field2 += add;
-    else field3 += add;
+    if (group >= 0 && group < 8) fields[group] += add;
   }
-  vec3 ink = vec3(1.0);
-  ink *= mix(vec3(1.0), uColors[0], edgeOf(field0));
-  ink *= mix(vec3(1.0), uColors[1], edgeOf(field1));
-  ink *= mix(vec3(1.0), uColors[2], edgeOf(field2));
-  ink *= mix(vec3(1.0), uColors[3], edgeOf(field3));
-  outColor = vec4(ink, 1.0);
+  vec3 color = uPaper;
+  for (int group = 0; group < 8; group++) {
+    if (group >= uGroups) break;
+    color = mix(color, uColors[group], edgeOf(fields[group]) * uOpacity);
+  }
+  outColor = vec4(color, 1.0);
 }`
 
 let glCanvas = null
@@ -130,7 +132,23 @@ function ensureGL() {
 
 export function metaballRenderer() {
   ensureGL()
-  return gl ? 'webgl2' : 'cpu'
+  return gl ? 'webgl2' : glError || 'cpu'
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
+export function tuneOf(spec) {
+  const tune = spec?.tune || {}
+  return {
+    perColor: clamp(tune.perColor ?? TUNE_DEFAULTS.perColor, 4, 8),
+    falloff: clamp(tune.falloff ?? TUNE_DEFAULTS.falloff, 0.6, 5),
+    threshold: clamp(tune.threshold ?? TUNE_DEFAULTS.threshold, 0.2, 2.4),
+    opacity: clamp(tune.opacity ?? TUNE_DEFAULTS.opacity, 0.05, 1),
+    attract: clamp(tune.attract ?? TUNE_DEFAULTS.attract, 0, 3),
+    drift: clamp(tune.drift ?? TUNE_DEFAULTS.drift, 0, 3),
+  }
 }
 
 function sectionsOf(spec) {
@@ -229,26 +247,33 @@ function specKey(spec) {
 function createState(spec) {
   const sections = sectionsOf(spec)
   const rand = mulberry32((seedFor(spec, sections[0], sections) || 1) ^ 0x5eed)
-  const blobs = BLOBS.map((spot) => ({
-    x: spot.x + (rand() - 0.5) * 0.045,
-    y: spot.y + (rand() - 0.5) * 0.045,
-    vx: (rand() - 0.5) * 0.015,
-    vy: (rand() - 0.5) * 0.015,
-    r: spot.r,
-    group: spot.group,
-    parent: spot.parent,
-    droplet: spot.droplet,
-    phase: rand() * Math.PI * 2,
-  }))
-  for (const blob of blobs) {
-    if (!blob.droplet) continue
-    const parent = blobs[blob.parent]
-    blob.x = parent.x + Math.cos(blob.phase) * 0.03
-    blob.y = parent.y + Math.sin(blob.phase) * 0.03
-  }
-  for (const blob of blobs) {
-    blob.homeX = blob.x
-    blob.homeY = blob.y
+  const blobs = []
+  for (let group = 0; group < GROUPS; group += 1) {
+    const baseAngle = group * 2.399 + (rand() - 0.5) * 0.35
+    const baseR = 0.04 + (group % 2) * 0.028 + rand() * 0.012
+    const hx = Math.cos(baseAngle) * baseR
+    const hy = Math.sin(baseAngle) * baseR
+    const parent = blobs.length
+    for (let slot = 0; slot < PER_GROUP; slot += 1) {
+      const angle = slot * 2.15 + rand() * 0.55
+      const dist = slot === 0 ? 0 : (SIZES[0] + SIZES[slot]) * (1.45 + rand() * 0.55)
+      const x = hx + Math.cos(angle) * dist
+      const y = hy + Math.sin(angle) * dist
+      blobs.push({
+        x,
+        y,
+        homeX: x,
+        homeY: y,
+        vx: (rand() - 0.5) * 0.012,
+        vy: (rand() - 0.5) * 0.012,
+        r: SIZES[slot],
+        group,
+        slot,
+        parent,
+        droplet: slot >= 3,
+        phase: rand() * Math.PI * 2,
+      })
+    }
   }
   return {
     blobs,
@@ -262,10 +287,14 @@ function createState(spec) {
   }
 }
 
+function shownShare(count, groups) {
+  const used = Math.max(1, Math.min(GROUPS, groups))
+  return Math.min(PER_GROUP, Math.max(0, count) / used, MAX_BLOBS / used)
+}
+
 function step(state, time, dt, spec) {
-  const sections = sectionsOf(spec)
-  const section = sectionAt(sections, time) || sections[0]
-  const params = sectionParams(spec, section, sections)
+  const params = paramsAt(spec, time)
+  const tune = tuneOf(spec)
   const metrics = metricsAt(spec.profile, time)
   const previous = metricsAt(spec.profile, Math.max(0, time - dt))
   const tempo = (spec.tempo || 100) / 110
@@ -290,61 +319,92 @@ function step(state, time, dt, spec) {
   state.split = smoothToward(state.split, splitTarget, dt, AUDIO_TAU)
   state.splitHold = Math.max(0, state.splitHold - dt)
 
-  const attract = 0.08 + state.gather * 0.42 + state.bass * 0.55
-  const blobs = state.blobs
-  for (let i = 0; i < blobs.length; i += 1) {
-    for (let j = i + 1; j < blobs.length; j += 1) {
-      const dx = blobs[j].x - blobs[i].x
-      const dy = blobs[j].y - blobs[i].y
-      const dist = Math.hypot(dx, dy) + 0.001
-      const same = blobs[i].group === blobs[j].group
-      const rest = same ? 0.04 : 0.17
-      const falloff = Math.exp(-Math.max(0, dist - rest) * 1.3)
-      const pull = (same ? 1.2 : 0.38) * attract
-      const accel = (dist - rest) * pull * falloff
-      const ux = dx / dist
-      const uy = dy / dist
-      blobs[i].vx += ux * accel * dt
-      blobs[i].vy += uy * accel * dt
-      blobs[j].vx -= ux * accel * dt
-      blobs[j].vy -= uy * accel * dt
+  const groups = Math.max(1, params.colors.length)
+  const share = shownShare(params.count, groups)
+  const shown = []
+  for (const blob of state.blobs) {
+    if (blob.group < groups && blob.slot < share) shown.push(blob)
+    else {
+      blob.x = blob.homeX
+      blob.y = blob.homeY
+      blob.vx = 0
+      blob.vy = 0
     }
   }
 
-  for (const blob of blobs) {
-    const drift = 0.1 * tempo
+  const attract = (0.08 + state.gather * 0.42 + state.bass * 0.55) * tune.attract
+  for (let i = 0; i < shown.length; i += 1) {
+    for (let j = i + 1; j < shown.length; j += 1) {
+      const dx = shown[j].x - shown[i].x
+      const dy = shown[j].y - shown[i].y
+      const dist = Math.hypot(dx, dy) + 0.001
+      const same = shown[i].group === shown[j].group
+      const rest = same ? (shown[i].r + shown[j].r) * 1.7 : 0.22
+      const falloff = Math.exp(-Math.max(0, dist - rest) * 1.15)
+      const pull = (same ? 1.15 : 0.34) * attract
+      const accel = (dist - rest) * pull * falloff
+      const ux = dx / dist
+      const uy = dy / dist
+      shown[i].vx += ux * accel * dt
+      shown[i].vy += uy * accel * dt
+      shown[j].vx -= ux * accel * dt
+      shown[j].vy -= uy * accel * dt
+    }
+  }
+
+  let cx = 0
+  let cy = 0
+  let mass = 0
+  for (const blob of shown) {
+    cx += blob.x * blob.r
+    cy += blob.y * blob.r
+    mass += blob.r
+  }
+  if (mass > 0) {
+    cx /= mass
+    cy /= mass
+  }
+
+  const drift = 0.1 * tempo * tune.drift
+  for (const blob of shown) {
     blob.vx += Math.cos(state.angle + blob.phase + time * 0.22 * tempo) * drift * dt
     blob.vy += Math.sin(state.angle * 0.85 + blob.phase * 1.35 + time * 0.17 * tempo) * drift * dt
-    const hold = 0.7 - state.gather * 0.45
+    const hold = (0.62 - state.gather * 0.4) * (blob.droplet ? 1 - state.split * 0.7 : 1)
     blob.vx += (blob.homeX - blob.x) * hold * dt
     blob.vy += (blob.homeY - blob.y) * hold * dt
+    blob.vx -= cx * 1.05 * dt
+    blob.vy -= cy * 1.05 * dt
     if (blob.droplet) {
-      const parent = blobs[blob.parent]
+      const parent = state.blobs[blob.parent]
       const dx = blob.x - parent.x
       const dy = blob.y - parent.y
       const dist = Math.hypot(dx, dy) + 0.001
-      const outward = state.split * 0.55 * tempo
-      const home = state.bass * 0.85 - 0.12
+      const outward = state.split * 0.72 * tempo
+      const home = state.bass * 0.9 - 0.08
       blob.vx += (dx / dist) * outward * dt
       blob.vy += (dy / dist) * outward * dt
-      blob.vx += ((parent.x + (dx / dist) * 0.028 - blob.x) * home) * dt
-      blob.vy += ((parent.y + (dy / dist) * 0.028 - blob.y) * home) * dt
+      blob.vx += (parent.x + (dx / dist) * 0.03 - blob.x) * home * dt
+      blob.vy += (parent.y + (dy / dist) * 0.03 - blob.y) * home * dt
     }
-    const margin = 0.3
-    if (blob.x < -margin) blob.vx += (-margin - blob.x) * 2.4 * dt
-    if (blob.x > margin) blob.vx -= (blob.x - margin) * 2.4 * dt
-    if (blob.y < -margin) blob.vy += (-margin - blob.y) * 2.4 * dt
-    if (blob.y > margin) blob.vy -= (blob.y - margin) * 2.4 * dt
+    const reach = blob.r * params.scale * Math.sqrt(Math.max(0.6, tune.falloff) / 0.75)
+    const limit = Math.max(0.06, 0.5 - reach * 0.62)
+    const box = limit * 0.84
+    if (blob.x < -box) blob.vx += (-box - blob.x) * 3.4 * dt
+    if (blob.x > box) blob.vx -= (blob.x - box) * 3.4 * dt
+    if (blob.y < -box) blob.vy += (-box - blob.y) * 3.4 * dt
+    if (blob.y > box) blob.vy -= (blob.y - box) * 3.4 * dt
     blob.vx *= Math.exp(-dt * 0.85)
     blob.vy *= Math.exp(-dt * 0.85)
     const speed = Math.hypot(blob.vx, blob.vy)
-    const limit = 0.42 * tempo
-    if (speed > limit) {
-      blob.vx *= limit / speed
-      blob.vy *= limit / speed
+    const cap = 0.38 * tempo
+    if (speed > cap) {
+      blob.vx *= cap / speed
+      blob.vy *= cap / speed
     }
     blob.x += blob.vx * dt
     blob.y += blob.vy * dt
+    blob.x = clamp(blob.x, -limit, limit)
+    blob.y = clamp(blob.y, -limit, limit)
   }
 }
 
@@ -364,51 +424,89 @@ function simulate(spec, time) {
   return simCache.state
 }
 
+function liftColor(red, green, blue) {
+  const [hue, saturation, lightness] = rgbToHsl(red, green, blue)
+  if (lightness >= 0.48) return [red / 255, green / 255, blue / 255]
+  const next = 0.48 + (0.48 - lightness) * 0.2
+  const [r, g, b] = hexToRgb(hslToHex(hue, saturation, next))
+  return [r / 255, g / 255, b / 255]
+}
+
 function rgbOf(color) {
   if (typeof color === 'string' && color.startsWith('rgb')) {
     const parts = color.match(/\d+/g) || [0, 0, 0]
-    return [Number(parts[0]) / 255, Number(parts[1]) / 255, Number(parts[2]) / 255]
+    return liftColor(Number(parts[0]), Number(parts[1]), Number(parts[2]))
   }
   const [red, green, blue] = hexToRgb(color)
-  return [red / 255, green / 255, blue / 255]
+  return liftColor(red, green, blue)
 }
 
 function blobPixels(spec, state, width, height, bufferWidth, bufferHeight) {
   const params = paramsAt(spec, spec.time || 0)
+  const tune = tuneOf(spec)
   const unit = Math.min(width, height)
   const scaleX = bufferWidth / width
   const scaleY = bufferHeight / height
-  const data = new Float32Array(8 * 4)
-  for (let index = 0; index < state.blobs.length; index += 1) {
-    const blob = state.blobs[index]
-    const fade = Math.min(1, Math.max(0, params.count - index))
+  const pixelScale = (scaleX + scaleY) / 2
+  const groups = Math.max(1, Math.min(GROUPS, params.colors.length))
+  const share = shownShare(params.count, groups)
+  const roundness = clamp(spec.roundness ?? 0.7, 0, 1)
+  const threshold = tune.threshold + (0.5 - roundness) * 0.22 - state.loud * 0.08
+  const data = new Float32Array(MAX_BLOBS * 4)
+  let count = 0
+  const spread = Math.sqrt(tune.falloff / Math.max(0.25, threshold))
+  for (const blob of state.blobs) {
+    if (blob.group >= groups || blob.slot >= share || count >= MAX_BLOBS) continue
+    const fade = blob.slot + 1 <= share ? 1 : Math.max(0, share - blob.slot)
     const radius = blob.r * unit * params.scale * fade
-    const x = (width / 2 + blob.x * unit + params.offsetX * width) * scaleX
-    const y = (height / 2 + blob.y * unit + params.offsetY * height) * scaleY
-    data[index * 4] = x
-    data[index * 4 + 1] = y
-    data[index * 4 + 2] = radius * ((scaleX + scaleY) / 2)
-    data[index * 4 + 3] = blob.group
+    if (radius < 0.5) continue
+    let x = width / 2 + blob.x * unit + params.offsetX * width
+    let y = height / 2 + blob.y * unit + params.offsetY * height
+    const margin = radius * spread * 0.62
+    x = clamp(x, margin, Math.max(margin, width - margin))
+    y = clamp(y, margin, Math.max(margin, height - margin))
+    data[count * 4] = x * scaleX
+    data[count * 4 + 1] = y * scaleY
+    data[count * 4 + 2] = radius * pixelScale
+    data[count * 4 + 3] = blob.group
+    count += 1
   }
-  const colors = new Float32Array(12)
-  for (let group = 0; group < 4; group += 1) {
+  const colors = new Float32Array(GROUPS * 3)
+  for (let group = 0; group < GROUPS; group += 1) {
     const rgb = rgbOf(params.colors[group % params.colors.length])
     colors[group * 3] = rgb[0]
     colors[group * 3 + 1] = rgb[1]
     colors[group * 3 + 2] = rgb[2]
   }
-  const roundness = Math.min(1, Math.max(0, spec.roundness ?? 0.7))
-  const threshold = 1.18 - roundness * 0.38 - state.loud * 0.2
-  const softness = 0.012 + roundness * 0.03
-  return { data, colors, threshold, softness, count: state.blobs.length }
+  return {
+    data,
+    colors,
+    threshold,
+    falloff: tune.falloff,
+    opacity: tune.opacity,
+    count,
+    groups,
+  }
 }
 
-function renderGL(spec, state, width, height) {
+function bufferSize(ctx, width, height) {
+  const transform = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null
+  const scaleX = Math.abs(transform?.a || 1) || 1
+  const scaleY = Math.abs(transform?.d || 1) || 1
+  let bufferWidth = Math.max(2, Math.round(width * scaleX))
+  let bufferHeight = Math.max(2, Math.round(height * scaleY))
+  const longest = Math.max(bufferWidth, bufferHeight)
+  if (longest > 4096) {
+    const fit = 4096 / longest
+    bufferWidth = Math.max(2, Math.round(bufferWidth * fit))
+    bufferHeight = Math.max(2, Math.round(bufferHeight * fit))
+  }
+  return { bufferWidth, bufferHeight, scaleX, scaleY }
+}
+
+function renderGL(ctx, spec, state, width, height) {
   if (!ensureGL()) return null
-  const longest = Math.max(width, height)
-  const pixelScale = Math.min(2, 1400 / longest)
-  const bufferWidth = Math.max(2, Math.round(width * pixelScale))
-  const bufferHeight = Math.max(2, Math.round(height * pixelScale))
+  const { bufferWidth, bufferHeight } = bufferSize(ctx, width, height)
   if (glCanvas.width !== bufferWidth || glCanvas.height !== bufferHeight) {
     glCanvas.width = bufferWidth
     glCanvas.height = bufferHeight
@@ -419,10 +517,13 @@ function renderGL(spec, state, width, height) {
   gl.bindVertexArray(glVao)
   gl.uniform2f(gl.getUniformLocation(glProgram, 'uResolution'), bufferWidth, bufferHeight)
   gl.uniform1f(gl.getUniformLocation(glProgram, 'uThreshold'), field.threshold)
-  gl.uniform1f(gl.getUniformLocation(glProgram, 'uSoftness'), field.softness)
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'uFalloff'), field.falloff)
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'uOpacity'), field.opacity)
   gl.uniform1i(gl.getUniformLocation(glProgram, 'uCount'), field.count)
+  gl.uniform1i(gl.getUniformLocation(glProgram, 'uGroups'), field.groups)
   gl.uniform4fv(gl.getUniformLocation(glProgram, 'uBlobs'), field.data)
   gl.uniform3fv(gl.getUniformLocation(glProgram, 'uColors'), field.colors)
+  gl.uniform3f(gl.getUniformLocation(glProgram, 'uPaper'), PAPER_RGB[0], PAPER_RGB[1], PAPER_RGB[2])
   gl.drawArrays(gl.TRIANGLES, 0, 3)
   return glCanvas
 }
@@ -440,10 +541,11 @@ export function paintMetaballs(ctx, spec) {
   ctx.globalCompositeOperation = 'source-over'
   ctx.fillStyle = PAPER
   ctx.fillRect(0, 0, width, height)
-  const field = renderGL(spec, state, width, height)
+  const field = renderGL(ctx, spec, state, width, height)
   if (field) {
-    ctx.imageSmoothingEnabled = true
-    ctx.globalCompositeOperation = 'multiply'
+    const { bufferWidth, bufferHeight, scaleX, scaleY } = bufferSize(ctx, width, height)
+    const exact = Math.abs(width * scaleX - bufferWidth) < 0.75 && Math.abs(height * scaleY - bufferHeight) < 0.75
+    ctx.imageSmoothingEnabled = !exact
     ctx.drawImage(field, 0, 0, width, height)
   }
   ctx.restore()
