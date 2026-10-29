@@ -1,60 +1,138 @@
-import { shapeFill } from './calibrate.js'
-import { artworkColor, paletteColors } from './palette.js'
+import { paletteColors } from './palette.js'
+import { drawPoster } from './posters.js'
 import { metricsAt } from './profileTrack.js'
-import { layoutShapes, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import {
+  SECTION_BLEND,
+  motionAt,
+  posterStyle,
+  previousSection,
+  pickRecipe,
+  sectionAt,
+  sectionKey,
+  sectionSeed,
+} from './shapeLayout.js'
 
-export function paintFrame(ctx, spec) {
-  const { width, height } = spec
-  const colors = spec.colors?.length ? spec.colors : ['#2a6d78', '#314878', '#243d38']
+const buffers = [null, null]
+
+function scratch(index, width, height) {
+  const pixelWidth = Math.max(1, Math.round(width))
+  const pixelHeight = Math.max(1, Math.round(height))
+  let canvas = buffers[index]
+  if (!canvas) {
+    canvas = document.createElement('canvas')
+    buffers[index] = canvas
+  }
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth
+    canvas.height = pixelHeight
+  }
+  return canvas
+}
+
+let grainCanvas = null
+
+function grainSource() {
+  if (grainCanvas) return grainCanvas
+  const size = 160
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  const image = ctx.createImageData(size, size)
+  let state = 20260329
+  const data = image.data
+  for (let index = 0; index < data.length; index += 4) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    const tone = 112 + (state % 48)
+    data[index] = tone
+    data[index + 1] = tone
+    data[index + 2] = tone
+    data[index + 3] = 255
+  }
+  ctx.putImageData(image, 0, 0)
+  grainCanvas = canvas
+  return canvas
+}
+
+function paintGrain(ctx, width, height) {
+  const transform = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null
   ctx.save()
-  ctx.fillStyle = spec.background || '#1c3a44'
-  ctx.fillRect(0, 0, width, height)
-  const shown = layoutShapes({
-    seed: spec.seed || 1,
-    width,
-    height,
-    time: spec.time || 0,
-    loud: spec.loud ?? 0.35,
-    bass: spec.bass ?? 0.4,
-    high: spec.high ?? 0.25,
-    tempo: spec.tempo || 100,
-    roundness: spec.roundness ?? 0.7,
-  })
-
-  for (const shape of shown) {
-    const fill = spec.groups
-      ? shapeFill(shape, spec.groups, spec.sectionLabel, spec.references)
-      : colors[shape.index % colors.length]
-    ctx.save()
-    ctx.translate(shape.x, shape.y)
-    ctx.rotate(shape.rot)
-    ctx.globalAlpha = shape.band === 'low' ? 0.92 : 0.78
-    ctx.fillStyle = fill
-    traceShape(ctx, shape)
-    ctx.fill()
-    ctx.restore()
+  ctx.globalCompositeOperation = 'overlay'
+  ctx.globalAlpha = 0.1
+  ctx.fillStyle = ctx.createPattern(grainSource(), 'repeat')
+  if (transform) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.fillRect(0, 0, Math.max(1, Math.ceil(width * transform.a)), Math.max(1, Math.ceil(height * transform.d)))
+  } else {
+    ctx.fillRect(0, 0, width, height)
   }
   ctx.restore()
 }
 
-function traceShape(ctx, shape) {
-  const radius = shape.size / 2
-  ctx.beginPath()
-  if (shape.kind === 'circle') {
-    ctx.arc(0, 0, radius, 0, Math.PI * 2)
-  } else if (shape.kind === 'arc') {
-    ctx.arc(0, 0, radius, 0, Math.PI)
-    ctx.closePath()
-  } else if (shape.kind === 'wedge') {
-    ctx.moveTo(0, 0)
-    ctx.arc(0, 0, radius, -0.5, 0.85)
-    ctx.closePath()
-  } else {
-    ctx.moveTo(-shape.size / 2, shape.size / 2.5)
-    ctx.lineTo(shape.size / 2, shape.size / 2.5)
-    ctx.lineTo(0, -shape.size / 2.1)
-    ctx.closePath()
+function smoothstep(amount) {
+  const t = Math.min(1, Math.max(0, amount))
+  return t * t * (3 - 2 * t)
+}
+
+function sectionList(spec) {
+  if (spec.sections?.length) return spec.sections
+  return [{ start: 0, end: Number.POSITIVE_INFINITY, label: spec.sectionLabel || 'Quiet' }]
+}
+
+function seedFor(spec, section, sections) {
+  if (!section) return spec.seed || 1
+  const key = sectionKey(section)
+  if (spec.seeds && spec.seeds[key] != null) return spec.seeds[key]
+  const index = Math.max(0, sections.findIndex((item) => item.start === section.start && item.label === section.label))
+  return spec.seed || sectionSeed(section, index)
+}
+
+function describe(spec, section, sections) {
+  const seed = seedFor(spec, section, sections)
+  const recipe = pickRecipe(seed, section?.label || spec.sectionLabel || 'Quiet', spec.roundness ?? 0.7)
+  const style = posterStyle(spec.colors, seed)
+  return {
+    recipe,
+    seed,
+    ...style,
+    motion: motionAt({
+      profile: spec.profile,
+      time: spec.time || 0,
+      tempo: spec.tempo || 100,
+      seed,
+      section,
+    }),
   }
+}
+
+export function paintFrame(ctx, spec) {
+  const width = spec.width
+  const height = spec.height
+  const sections = sectionList(spec)
+  const section = sectionAt(sections, spec.time || 0) || sections[0]
+  const current = describe(spec, section, sections)
+  const elapsed = (spec.time || 0) - (section?.start || 0)
+  const previous = previousSection(sections, section)
+  const blending = previous && current && elapsed >= 0 && elapsed < SECTION_BLEND
+  const blend = blending ? smoothstep(elapsed / SECTION_BLEND) : 1
+
+  ctx.save()
+  ctx.globalAlpha = 1
+  ctx.globalCompositeOperation = 'source-over'
+  if (blending && blend < 1) {
+    const from = scratch(0, width, height)
+    const to = scratch(1, width, height)
+    const outgoing = describe({ ...spec, time: Math.max(0, section.start - 0.001) }, previous, sections)
+    drawPoster(from.getContext('2d'), { ...outgoing, width, height })
+    drawPoster(to.getContext('2d'), { ...current, width, height })
+    ctx.drawImage(from, 0, 0, width, height)
+    ctx.globalAlpha = blend
+    ctx.drawImage(to, 0, 0, width, height)
+  } else {
+    drawPoster(ctx, { ...current, width, height })
+  }
+  paintGrain(ctx, width, height)
+  ctx.restore()
 }
 
 export function frameInput({ track, studio, profile, time, width, height }) {
@@ -69,12 +147,12 @@ export function frameInput({ track, studio, profile, time, width, height }) {
     height,
     time,
     seed: studio.seeds?.[key] ?? (section ? sectionSeed(section, Math.max(0, index)) : 1),
+    seeds: studio.seeds || {},
+    sections,
+    profile,
     roundness: studio.roundness ?? 0.7,
     tempo: track?.bpm ?? 100,
     colors,
-    background: artworkColor(colors),
-    groups: studio.calibration?.groups ?? null,
-    references: studio.calibration?.references ?? [],
     sectionLabel: section?.label || '',
     loud: metrics.loud,
     bass: metrics.bass,

@@ -18,11 +18,11 @@ export function mountShapes(node, liveRef, sizeRef) {
       const { w, h } = sizeRef.current
       p.createCanvas(Math.max(10, w), Math.max(10, h))
       p.pixelDensity(Math.min(2, window.devicePixelRatio || 1))
-      p.background(liveRef.current.background || '#1c3a44')
+      p.background('#111111')
     }
 
     p.draw = () => {
-      if (node.__halftoneSketch !== token) {
+      if (!p.canvas?.isConnected) {
         p._loop = false
         return
       }
@@ -41,9 +41,9 @@ export function mountShapes(node, liveRef, sizeRef) {
         tempo: live.tempo || 100,
         roundness: live.roundness ?? 0.7,
         colors: live.colors,
-        background: live.background,
-        groups: live.groups,
-        references: live.references,
+        sections: live.sections,
+        seeds: live.seeds,
+        profile: live.profile,
         sectionLabel: live.sectionLabel,
       })
     }

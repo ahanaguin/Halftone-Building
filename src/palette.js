@@ -30,15 +30,15 @@ export function paletteForSection(label) {
 
 export function explainSection(label) {
   if (label === 'Quiet') {
-    return 'This part is quieter, so fewer shapes show and they stay smaller. The colors stay cool and muted.'
+    return 'This quieter part holds one calm poster. Loudness only shifts the size of those large shapes a little.'
   }
   if (label === 'Build') {
-    return 'The energy is rising, so more shapes come in and begin to drift. The palette warms as the section builds.'
+    return 'The energy is rising, so the poster cuts across the frame with a few large shapes and thin guides.'
   }
   if (label === 'Peak') {
-    return 'This is the loudest part, so the shapes grow and fill more of the frame. Brighter, warmer colors follow that energy.'
+    return 'This is the loud part, so the poster opens into a burst or a beating grid. A drop cuts straight into another composition.'
   }
-  return 'Shapes follow the loudness and tone of the section you are in. A louder moment brings more of them forward.'
+  return 'Each section holds one poster built from a few large shapes. Loudness shifts their size, and a drop cuts to a new one.'
 }
 
 function clamp(value, min, max) {

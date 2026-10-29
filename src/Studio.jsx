@@ -4,7 +4,6 @@ import {
   MAX_SWATCHES,
   applySectionPreset,
   artworkColor,
-  explainSection,
   hexToRgb,
   paletteColors,
   paletteForSection,
@@ -13,7 +12,7 @@ import {
   swatchHex,
 } from './palette.js'
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
-import { sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { explainPoster, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { useTrack } from './track.jsx'
 
@@ -62,6 +61,8 @@ export function Studio() {
   const [format, setFormat] = useState('16:9')
   const [section, setSection] = useState(null)
   const [playing, setPlaying] = useState(false)
+  const [poster, setPoster] = useState('eclipse')
+  const posterRef = useRef('eclipse')
   const [audioUrl, setAudioUrl] = useState('')
   const [size, setSize] = useState({ w: 640, h: 360, frame: 420 })
   const slotRef = useRef(null)
@@ -85,9 +86,9 @@ export function Studio() {
     seed: 1,
     roundness: studio.roundness,
     colors: paletteColors(studio.palette),
-    background: artworkColor(paletteColors(studio.palette)),
-    groups: studio.calibration?.groups ?? null,
-    references: studio.calibration?.references ?? [],
+    sections: track?.sections || [],
+    seeds: studio.seeds,
+    profile: profileRef.current,
     sectionLabel: '',
   })
 
@@ -102,11 +103,11 @@ export function Studio() {
     ...liveRef.current,
     tempo: track?.bpm ?? liveRef.current.tempo ?? 100,
     colors,
-    background: artwork,
     roundness: studio.roundness,
     seed: studio.seeds[activeKey] ?? liveRef.current.seed,
-    groups: studio.calibration?.groups ?? null,
-    references: studio.calibration?.references ?? [],
+    sections: track?.sections || [],
+    seeds: studio.seeds,
+    profile: profileRef.current,
     sectionLabel: section?.label || '',
   }
 
@@ -207,12 +208,17 @@ export function Studio() {
         live.tempo = currentTrack.bpm ?? 100
         live.time = audio.currentTime
         live.colors = paletteColorsNow
-        live.background = artworkColor(paletteColorsNow)
         live.roundness = studioNow.roundness
         live.seed = studioNow.seeds[key] ?? 1
-        live.groups = studioNow.calibration?.groups ?? null
-        live.references = studioNow.calibration?.references ?? []
+        live.sections = currentTrack.sections || []
+        live.seeds = studioNow.seeds
+        live.profile = profile
         live.sectionLabel = next?.label || ''
+        const shown = pickRecipe(live.seed, live.sectionLabel || 'Quiet', live.roundness ?? 0.7)
+        if (shown !== posterRef.current) {
+          posterRef.current = shown
+          setPoster(shown)
+        }
         const jumped = Math.abs(audio.currentTime - lastTime) > 0.35
         lastTime = audio.currentTime
         const graph = graphRef.current
@@ -390,6 +396,16 @@ export function Studio() {
     }))
   }
 
+  useEffect(() => {
+    const index = section && track?.sections
+      ? track.sections.findIndex((item) => item.start === section.start && item.label === section.label)
+      : 0
+    const seed = studio.seeds[activeKey] ?? (section ? sectionSeed(section, Math.max(0, index)) : 1)
+    const shown = pickRecipe(seed, section?.label || 'Quiet', studio.roundness)
+    posterRef.current = shown
+    setPoster(shown)
+  }, [activeKey, section, studio.seeds, studio.roundness, track])
+
   const warmth = Math.round((1 - studio.palette.warmth) * 100)
   const lightness = Math.round(studio.palette.lightness * 100)
   const spiky = Math.round((1 - studio.roundness) * 100)
@@ -417,7 +433,7 @@ export function Studio() {
             <div
               ref={holderRef}
               className="canvas-stage"
-              style={{ width: size.w, height: size.h, background: artwork }}
+              style={{ width: size.w, height: size.h, background: shapesOn ? '#111111' : artwork }}
               role={track && shapesOn ? 'img' : undefined}
               aria-label={track && shapesOn ? 'Shapes reacting to the track' : undefined}
             />
@@ -436,7 +452,7 @@ export function Studio() {
 
         <div className="why">
           <strong>Why it looks like this</strong>
-          <p>{explainSection(section?.label)}</p>
+          <p>{explainPoster(poster)}</p>
         </div>
 
         {track ? (
