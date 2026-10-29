@@ -28,6 +28,10 @@ export function Landing() {
       <h1 className="wordmark-title">
         <Wordmark />
       </h1>
+      <p className="landing-note">
+        Halftone is a free tool for independent musicians that turns your songs into animated visualizers, Spotify
+        Canvas loops, and cover art, using colors and styles you choose.
+      </p>
       <Link className="button" to="/calibrate">
         New visual
       </Link>

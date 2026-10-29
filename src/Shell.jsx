@@ -88,49 +88,9 @@ export function Shell() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="topbar-brand">
-          <button
-            ref={menuRef}
-            type="button"
-            className="icon-button"
-            aria-label="Menu"
-            aria-expanded={open}
-            onClick={() => setOpen(true)}
-          >
-            <Hamburger />
-          </button>
-          {location.pathname !== '/' ? <Wordmark className="topbar-mark" /> : null}
-        </div>
-        {studio ? <p className="topbar-track">{track?.fileName ?? 'No track yet'}</p> : null}
-        {studio ? (
-          <div className="studio-actions">
-            <Link to="/pick-a-style" className="text-link back-styles">
-              {'< Back to styles'}
-            </Link>
-            <button type="button" className="button-outline undo-button">
-              Undo
-            </button>
-            <Link to="/export" className="button">
-              Export
-            </Link>
-          </div>
-        ) : location.pathname === '/upload' ? (
-          <p className="topbar-status">Palette saved</p>
-        ) : null}
-      </header>
-
-      <div
-        className={open ? 'scrim open' : 'scrim'}
-        onClick={closeMenu}
-        hidden={!open}
-      />
-
       <aside
         className={open ? 'sidebar open' : 'sidebar'}
-        role="dialog"
         aria-label="Menu"
-        aria-modal={open}
         aria-hidden={!open}
         inert={!open}
       >
@@ -152,11 +112,44 @@ export function Shell() {
           <nav className="nav nav-bottom" onClick={closeMenu}>
             <NavItems items={SECONDARY} />
           </nav>
-          <p className="privacy">Your images stay on this device.</p>
+          <p className="privacy">Your audio and images stay on this device</p>
         </div>
       </aside>
 
-      <Outlet />
+      <div className="app-main">
+        <header className="topbar">
+          <div className="topbar-brand">
+            <button
+              ref={menuRef}
+              type="button"
+              className="icon-button"
+              aria-label="Menu"
+              aria-expanded={open}
+              onClick={() => setOpen(true)}
+            >
+              <Hamburger />
+            </button>
+            {location.pathname !== '/' ? <Wordmark className="topbar-mark" /> : null}
+          </div>
+          {studio ? <p className="topbar-track">{track?.fileName ?? 'No track yet'}</p> : null}
+          {studio ? (
+            <div className="studio-actions">
+              <Link to="/pick-a-style" className="text-link back-styles">
+                {'< Back to styles'}
+              </Link>
+              <button type="button" className="button-outline header-button">
+                Undo
+              </button>
+              <Link to="/export" className="button header-button">
+                Export
+              </Link>
+            </div>
+          ) : location.pathname === '/upload' ? (
+            <p className="topbar-status">Palette saved</p>
+          ) : null}
+        </header>
+        <Outlet />
+      </div>
     </div>
   )
 }

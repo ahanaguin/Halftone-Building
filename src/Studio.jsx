@@ -7,17 +7,10 @@ import { useTrack } from './track.jsx'
 
 const FORMATS = ['9:16', '1:1', '16:9']
 
-function fitCanvas(format, maxWidth, maxHeight) {
+function fitCanvas(format, maxWidth) {
   const ratio = format === '9:16' ? 9 / 16 : format === '1:1' ? 1 : 16 / 9
-  const widthLimit = Math.max(160, maxWidth)
-  const heightLimit = Math.max(160, maxHeight)
-  let width = widthLimit
-  let height = width / ratio
-  if (height > heightLimit) {
-    height = heightLimit
-    width = height * ratio
-  }
-  return { w: Math.round(width), h: Math.round(height) }
+  const width = Math.max(160, Math.floor(maxWidth))
+  return { w: width, h: Math.max(160, Math.round(width / ratio)) }
 }
 
 function sectionAt(sections, time) {
@@ -120,7 +113,7 @@ export function Studio() {
     const slot = slotRef.current
     if (!slot) return undefined
     const measure = () => {
-      const next = fitCanvas(format, slot.clientWidth, slot.clientHeight)
+      const next = fitCanvas(format, slot.clientWidth)
       sizeRef.current = next
       setSize((current) => (current.w === next.w && current.h === next.h ? current : next))
     }
@@ -250,12 +243,12 @@ export function Studio() {
             <div
               ref={holderRef}
               className="canvas-frame"
-              style={{ width: size.w, height: size.h }}
+              style={{ height: size.h }}
               role="img"
               aria-label="Shapes reacting to the track"
             />
           ) : (
-            <div className="canvas-frame canvas-empty" style={{ width: size.w, height: size.h }}>
+            <div className="canvas-frame canvas-empty" style={{ height: size.h }}>
               <p>Upload a track to see shapes.</p>
               <Link className="text-link" to="/upload">
                 Go to upload
