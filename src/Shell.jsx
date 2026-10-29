@@ -59,7 +59,7 @@ function NavItems({ items }) {
 export function Shell() {
   const [open, setOpen] = useState(false)
   const location = useLocation()
-  const { track } = useTrack()
+  const { track, canUndo, undoStudio } = useTrack()
   const studio = location.pathname === '/studio'
   const menuRef = useRef(null)
   const closeRef = useRef(null)
@@ -129,7 +129,9 @@ export function Shell() {
             >
               <Hamburger />
             </button>
-            {location.pathname !== '/' ? <Wordmark className="topbar-mark" /> : null}
+            <Link to="/" className="topbar-logo">
+              <Wordmark className="topbar-mark" />
+            </Link>
           </div>
           {studio ? <p className="topbar-track">{track?.fileName ?? 'No track yet'}</p> : null}
           {studio ? (
@@ -137,7 +139,7 @@ export function Shell() {
               <Link to="/pick-a-style" className="text-link back-styles">
                 {'< Back to styles'}
               </Link>
-              <button type="button" className="button-outline header-button">
+              <button type="button" className="button-outline header-button" onClick={undoStudio} disabled={!canUndo}>
                 Undo
               </button>
               <Link to="/export" className="button header-button">

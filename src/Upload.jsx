@@ -36,6 +36,11 @@ export function Upload() {
   const [error, setError] = useState('')
   const [playing, setPlaying] = useState(false)
   const [audioUrl, setAudioUrl] = useState('')
+  const [shown, setShown] = useState(track)
+  const [closing, setClosing] = useState(false)
+  const closeTimer = useRef(0)
+  const trackRef = useRef(track)
+  trackRef.current = track
 
   useEffect(() => {
     if (!track?.file) {
@@ -49,10 +54,23 @@ export function Upload() {
     return () => URL.revokeObjectURL(url)
   }, [track?.file])
 
+  useEffect(() => {
+    if (!track) return undefined
+    window.clearTimeout(closeTimer.current)
+    setShown(track)
+    setClosing(false)
+    return undefined
+  }, [track])
+
+  useEffect(() => () => window.clearTimeout(closeTimer.current), [])
+
   async function accept(file) {
     audioRef.current?.pause()
     setPlaying(false)
+    window.clearTimeout(closeTimer.current)
     setTrack(null)
+    setShown(null)
+    setClosing(false)
     setError('')
     setStatus('loading')
     try {
@@ -76,6 +94,27 @@ export function Upload() {
       audio.pause()
       setPlaying(false)
     }
+  }
+
+  function removeTrack() {
+    audioRef.current?.pause()
+    setPlaying(false)
+    setError('')
+    setStatus('idle')
+    setTrack(null)
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduce) {
+      setShown(null)
+      setClosing(false)
+      return
+    }
+    setClosing(true)
+    window.clearTimeout(closeTimer.current)
+    closeTimer.current = window.setTimeout(() => {
+      if (trackRef.current) return
+      setShown(null)
+      setClosing(false)
+    }, 440)
   }
 
   function onDrop(event) {
@@ -124,14 +163,20 @@ export function Upload() {
                 {playing ? 'Pause' : 'Play'}
               </button>
             ) : null}
-            <button
-              type="button"
-              className="button-outline"
-              disabled={busy}
-              onClick={() => inputRef.current?.click()}
-            >
-              Choose file
-            </button>
+            {track ? (
+              <button type="button" className="button-outline" onClick={removeTrack}>
+                Remove
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="button-outline"
+                disabled={busy}
+                onClick={() => inputRef.current?.click()}
+              >
+                Choose file
+              </button>
+            )}
           </div>
           {error === SHORT_TRACK_MESSAGE ? (
             <p className="upload-note" role="alert">
@@ -161,45 +206,47 @@ export function Upload() {
           />
         </section>
 
-        {track ? (
-          <section className="heard" aria-live="polite">
-            <div className="heard-head">
-              <strong>{track.fileName}</strong>
-              <span>Here's what we've heard</span>
-            </div>
-            <div className={playing ? 'wave playing' : 'wave'} aria-hidden="true">
-              {track.bars.map((level, index) => (
-                <span
-                  key={index}
-                  style={{
-                    height: `${Math.max(6, level * 100)}%`,
-                    '--i': index,
-                  }}
-                />
-              ))}
-            </div>
-            <div className="sections">
-              {track.sections.map((section) => (
-                <span key={`${section.start}-${section.label}`} style={sectionStyle(section, track.duration)}>
-                  {section.label}
-                </span>
-              ))}
-            </div>
-            <div className="stats">
-              <div className="stat">
-                <span>Tempo</span>
-                <strong>{track.bpm == null ? '—' : track.bpm}</strong>
+        {shown ? (
+          <div className={closing ? 'heard-slot closing' : 'heard-slot'}>
+            <section className="heard" aria-live="polite" aria-hidden={closing}>
+              <div className="heard-head">
+                <strong>{shown.fileName}</strong>
+                <span>Here's what we've heard</span>
               </div>
-              <div className="stat">
-                <span>Energy</span>
-                <strong>{track.energy}</strong>
+              <div className={playing ? 'wave playing' : 'wave'} aria-hidden="true">
+                {shown.bars.map((level, index) => (
+                  <span
+                    key={index}
+                    style={{
+                      height: `${Math.max(6, level * 100)}%`,
+                      '--i': index,
+                    }}
+                  />
+                ))}
               </div>
-              <div className="stat">
-                <span>Mood</span>
-                <strong>{track.mood}</strong>
+              <div className="sections">
+                {shown.sections.map((section) => (
+                  <span key={`${section.start}-${section.label}`} style={sectionStyle(section, shown.duration)}>
+                    {section.label}
+                  </span>
+                ))}
               </div>
-            </div>
-          </section>
+              <div className="stats">
+                <div className="stat">
+                  <span>Tempo</span>
+                  <strong>{shown.bpm == null ? '—' : shown.bpm}</strong>
+                </div>
+                <div className="stat">
+                  <span>Energy</span>
+                  <strong>{shown.energy}</strong>
+                </div>
+                <div className="stat">
+                  <span>Mood</span>
+                  <strong>{shown.mood}</strong>
+                </div>
+              </div>
+            </section>
+          </div>
         ) : null}
 
         <div className="upload-actions">

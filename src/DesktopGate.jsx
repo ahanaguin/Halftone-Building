@@ -25,7 +25,9 @@ export function DesktopGate() {
 
   return (
     <main className="gate">
-      <Wordmark />
+      <div className="gate-mark">
+        <Wordmark />
+      </div>
       <p>works better on desktop.</p>
       <button type="button" className="button" onClick={copyLink}>
         {copied ? 'Copied' : 'Copy link'}

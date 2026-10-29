@@ -1,16 +1,44 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { explainSection, paletteForSection } from './palette.js'
+import {
+  MAX_SWATCHES,
+  applySectionPreset,
+  artworkColor,
+  explainSection,
+  hexToRgb,
+  paletteColors,
+  paletteForSection,
+  rgbToHsl,
+  shiftUnlocked,
+  swatchHex,
+} from './palette.js'
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
+import { sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { useTrack } from './track.jsx'
 
 const FORMATS = ['9:16', '1:1', '16:9']
+const STYLES = [
+  { id: 'shapes', label: 'Shapes', ready: true },
+  { id: 'halftone', label: 'Halftone', ready: false },
+  { id: 'bars', label: 'Bars', ready: false },
+  { id: 'wave', label: 'Wave', ready: false },
+  { id: 'poster', label: 'Poster', ready: false },
+  { id: 'image', label: 'Animate your image', ready: false },
+]
 
-function fitCanvas(format, maxWidth) {
+function fitCanvas(format, boxWidth, boxHeight) {
   const ratio = format === '9:16' ? 9 / 16 : format === '1:1' ? 1 : 16 / 9
-  const width = Math.max(160, Math.floor(maxWidth))
-  return { w: width, h: Math.max(160, Math.round(width / ratio)) }
+  const pad = 18
+  const maxW = Math.max(80, boxWidth - pad * 2)
+  const maxH = Math.max(80, boxHeight - pad * 2)
+  let width = maxW
+  let height = width / ratio
+  if (height > maxH) {
+    height = maxH
+    width = height * ratio
+  }
+  return { w: Math.round(width), h: Math.round(height), frame: Math.round(boxHeight) }
 }
 
 function sectionAt(sections, time) {
@@ -44,20 +72,22 @@ function LockIcon() {
 }
 
 export function Studio() {
-  const { track, palette, setPalette } = useTrack()
+  const { track, studio, editStudio, syncStudio, commitStudio } = useTrack()
   const [format, setFormat] = useState('16:9')
   const [section, setSection] = useState(null)
   const [playing, setPlaying] = useState(false)
   const [audioUrl, setAudioUrl] = useState('')
-  const [size, setSize] = useState({ w: 640, h: 360 })
+  const [size, setSize] = useState({ w: 640, h: 360, frame: 420 })
   const slotRef = useRef(null)
+  const sideRef = useRef(null)
   const holderRef = useRef(null)
   const audioRef = useRef(null)
   const waveRef = useRef(null)
   const playheadRef = useRef(null)
   const graphRef = useRef(null)
   const profileRef = useRef(track?.profile ?? null)
-  const paletteRef = useRef(palette)
+  const studioRef = useRef(studio)
+  const slideOrigin = useRef(null)
   const sizeRef = useRef(size)
   const liveRef = useRef({
     loud: 0.35,
@@ -65,13 +95,28 @@ export function Studio() {
     high: 0.25,
     harsh: 0.2,
     tempo: track?.bpm ?? 100,
-    sectionKey: '',
-    colors: palette.colors,
+    time: 0,
+    seed: 1,
+    roundness: studio.roundness,
+    colors: paletteColors(studio.palette),
+    background: artworkColor(paletteColors(studio.palette)),
   })
 
-  paletteRef.current = palette
+  studioRef.current = studio
   sizeRef.current = size
   if (track?.profile?.timeline) profileRef.current = track.profile
+
+  const colors = paletteColors(studio.palette)
+  const artwork = artworkColor(colors)
+  const activeKey = section ? sectionKey(section) : ''
+  liveRef.current = {
+    ...liveRef.current,
+    tempo: track?.bpm ?? liveRef.current.tempo ?? 100,
+    colors,
+    background: artwork,
+    roundness: studio.roundness,
+    seed: studio.seeds[activeKey] ?? liveRef.current.seed,
+  }
 
   useEffect(() => {
     if (!track?.file) {
@@ -84,6 +129,22 @@ export function Studio() {
     setSection(track.sections?.[0] ?? null)
     return () => URL.revokeObjectURL(url)
   }, [track])
+
+  useEffect(() => {
+    if (!track?.sections?.length) return
+    syncStudio((current) => {
+      let changed = false
+      const seeds = { ...current.seeds }
+      track.sections.forEach((item, index) => {
+        const key = sectionKey(item)
+        if (seeds[key] == null) {
+          seeds[key] = sectionSeed(item, index)
+          changed = true
+        }
+      })
+      return changed ? { ...current, seeds } : current
+    })
+  }, [track, syncStudio])
 
   useEffect(() => {
     if (!track?.file || track.profile?.timeline) return undefined
@@ -101,32 +162,38 @@ export function Studio() {
   useEffect(() => {
     const label = section?.label
     if (!label) return
-    setPalette((current) => {
-      if (current?.source === 'custom') return current
-      const next = paletteForSection(label)
-      if (current?.source === 'default' && current.colors.join() === next.colors.join()) return current
-      return { source: 'default', ...next }
+    syncStudio((current) => {
+      if (current.palette.source === 'custom') return current
+      const palette = applySectionPreset(current.palette, paletteForSection(label))
+      return palette === current.palette ? current : { ...current, palette }
     })
-  }, [section, setPalette])
+  }, [section, syncStudio])
 
   useEffect(() => {
     const slot = slotRef.current
-    if (!slot) return undefined
+    const side = sideRef.current
+    if (!slot || !side) return undefined
     const measure = () => {
-      const next = fitCanvas(format, slot.clientWidth)
+      const boxWidth = slot.clientWidth
+      const boxHeight = side.offsetHeight
+      if (boxWidth < 40 || boxHeight < 40) return
+      const next = fitCanvas(format, boxWidth, boxHeight)
       sizeRef.current = next
-      setSize((current) => (current.w === next.w && current.h === next.h ? current : next))
+      setSize((current) =>
+        current.w === next.w && current.h === next.h && current.frame === next.frame ? current : next,
+      )
     }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(slot)
+    observer.observe(side)
     return () => observer.disconnect()
-  }, [format])
+  }, [format, studio.style, studio.palette.swatches.length])
 
   useEffect(() => {
-    if (!holderRef.current || !track) return undefined
+    if (!holderRef.current || !track || studio.style !== 'shapes') return undefined
     return mountShapes(holderRef.current, liveRef, sizeRef)
-  }, [track])
+  }, [track, studio.style])
 
   useEffect(() => {
     let frame = 0
@@ -134,30 +201,34 @@ export function Studio() {
     const tick = () => {
       const audio = audioRef.current
       const profile = profileRef.current
-      if (audio && track?.duration) {
-        const ratio = Math.min(1, Math.max(0, audio.currentTime / track.duration))
+      const currentTrack = track
+      if (audio && currentTrack?.duration) {
+        const ratio = Math.min(1, Math.max(0, audio.currentTime / currentTrack.duration))
         if (playheadRef.current) playheadRef.current.style.left = `${ratio * 100}%`
         if (waveRef.current) waveRef.current.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
-        const next = sectionAt(track.sections, audio.currentTime)
+        const next = sectionAt(currentTrack.sections, audio.currentTime)
         setSection((current) => (current?.start === next?.start ? current : next))
-        const colors = paletteRef.current.colors
-        const tempo = track.bpm ?? 100
-        const sectionKey = next ? `${next.start}:${next.label}` : ''
+        const studioNow = studioRef.current
+        const key = next ? sectionKey(next) : ''
+        const paletteColorsNow = paletteColors(studioNow.palette)
         const live = liveRef.current
-        live.tempo = tempo
-        live.sectionKey = sectionKey
-        live.colors = colors
+        live.tempo = currentTrack.bpm ?? 100
+        live.time = audio.currentTime
+        live.colors = paletteColorsNow
+        live.background = artworkColor(paletteColorsNow)
+        live.roundness = studioNow.roundness
+        live.seed = studioNow.seeds[key] ?? 1
         const jumped = Math.abs(audio.currentTime - lastTime) > 0.35
         lastTime = audio.currentTime
         const graph = graphRef.current
         const snapped = metricsAt(profile, audio.currentTime)
-        const playing = graph && profile && !audio.paused && !audio.ended
-        if (snapped && (!playing || jumped)) Object.assign(live, snapped)
-        if (playing && !jumped) {
+        const playingNow = graph && profile && !audio.paused && !audio.ended
+        if (snapped && (!playingNow || jumped)) Object.assign(live, snapped)
+        if (playingNow && !jumped) {
           const time = new Float32Array(graph.analyser.fftSize)
           graph.analyser.getFloatTimeDomainData(time)
           const features = windowFeatures(time, graph.analyser.context.sampleRate)
-          const blend = (key, value) => live[key] * 0.62 + value * 0.38
+          const blend = (metric, value) => live[metric] * 0.62 + value * 0.38
           live.loud = blend('loud', unit(features.rms, profile.rms))
           live.bass = blend('bass', unit(features.bass, profile.bass))
           live.high = blend('high', unit(features.high, profile.high))
@@ -218,8 +289,128 @@ export function Studio() {
     if (event.key === 'ArrowLeft') audio.currentTime = Math.max(0, audio.currentTime - 2)
   }
 
-  const warmth = Math.round((1 - palette.warmth) * 100)
-  const lightness = Math.round(palette.lightness * 100)
+  function startSlide() {
+    slideOrigin.current = studioRef.current
+  }
+
+  function finishSlide() {
+    commitStudio(slideOrigin.current)
+    slideOrigin.current = null
+  }
+
+  function paintPalette(recipe) {
+    const apply = (current) => {
+      const palette = recipe(current.palette)
+      return palette === current.palette ? current : { ...current, palette }
+    }
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
+  function onWarmth(event) {
+    const warmth = 1 - Number(event.target.value) / 100
+    paintPalette((palette) => {
+      if (warmth === palette.warmth) return palette
+      return {
+        ...palette,
+        source: 'custom',
+        warmth,
+        swatches: shiftUnlocked(palette.swatches, palette.warmth, warmth, palette.lightness, palette.lightness),
+      }
+    })
+  }
+
+  function onLightness(event) {
+    const lightness = Number(event.target.value) / 100
+    paintPalette((palette) => {
+      if (lightness === palette.lightness) return palette
+      return {
+        ...palette,
+        source: 'custom',
+        lightness,
+        swatches: shiftUnlocked(palette.swatches, palette.warmth, palette.warmth, palette.lightness, lightness),
+      }
+    })
+  }
+
+  function onRoundness(event) {
+    const roundness = 1 - Number(event.target.value) / 100
+    const apply = (current) => (current.roundness === roundness ? current : { ...current, roundness })
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
+  function onPick(id, hex) {
+    const [red, green, blue] = hexToRgb(hex)
+    const [h, s, l] = rgbToHsl(red, green, blue)
+    const apply = (current) => ({
+      ...current,
+      palette: {
+        ...current.palette,
+        source: 'custom',
+        swatches: current.palette.swatches.map((swatch) => (swatch.id === id ? { ...swatch, h, s, l } : swatch)),
+      },
+    })
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
+  function onLock(id) {
+    editStudio((current) => ({
+      ...current,
+      palette: {
+        ...current.palette,
+        swatches: current.palette.swatches.map((swatch) =>
+          swatch.id === id ? { ...swatch, locked: !swatch.locked } : swatch,
+        ),
+      },
+    }))
+  }
+
+  function onAddColor() {
+    editStudio((current) => {
+      const swatches = current.palette.swatches
+      if (swatches.length >= MAX_SWATCHES) return current
+      const last = swatches[swatches.length - 1]
+      return {
+        ...current,
+        palette: {
+          ...current.palette,
+          source: 'custom',
+          swatches: [
+            ...swatches,
+            {
+              id: `swatch-add-${Date.now().toString(36)}-${swatches.length}`,
+              h: (last.h + 46) % 360,
+              s: Math.min(0.9, Math.max(0.35, last.s)),
+              l: last.l,
+              locked: false,
+            },
+          ],
+        },
+      }
+    })
+  }
+
+  function onStyle(event) {
+    const style = event.target.value
+    if (!STYLES.find((item) => item.id === style)?.ready) return
+    editStudio((current) => (current.style === style ? current : { ...current, style }))
+  }
+
+  function redoSection() {
+    if (!section) return
+    const key = sectionKey(section)
+    editStudio((current) => ({
+      ...current,
+      seeds: { ...current.seeds, [key]: (Math.random() * 0x100000000) >>> 0 },
+    }))
+  }
+
+  const warmth = Math.round((1 - studio.palette.warmth) * 100)
+  const lightness = Math.round(studio.palette.lightness * 100)
+  const spiky = Math.round((1 - studio.roundness) * 100)
+  const shapesOn = studio.style === 'shapes'
 
   return (
     <main className="studio">
@@ -239,22 +430,25 @@ export function Studio() {
         </div>
 
         <div className="canvas-slot" ref={slotRef}>
-          {track ? (
+          <div className="canvas-frame" style={{ height: size.frame }}>
             <div
               ref={holderRef}
-              className="canvas-frame"
-              style={{ height: size.h }}
-              role="img"
-              aria-label="Shapes reacting to the track"
+              className="canvas-stage"
+              style={{ width: size.w, height: size.h, background: artwork }}
+              role={track && shapesOn ? 'img' : undefined}
+              aria-label={track && shapesOn ? 'Shapes reacting to the track' : undefined}
             />
-          ) : (
-            <div className="canvas-frame canvas-empty" style={{ height: size.h }}>
-              <p>Upload a track to see shapes.</p>
-              <Link className="text-link" to="/upload">
-                Go to upload
-              </Link>
-            </div>
-          )}
+            {track && shapesOn ? null : (
+              <div className="canvas-empty">
+                {track ? <p>Coming soon</p> : <p>Upload a track to see shapes.</p>}
+                {track ? null : (
+                  <Link className="text-link" to="/upload">
+                    Go to upload
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="why">
@@ -304,15 +498,17 @@ export function Studio() {
                   const selected = section?.start === item.start
                   return (
                     <button
-                      key={`${item.start}-${item.label}`}
+                      key={sectionKey(item)}
                       type="button"
                       className={selected ? 'section-chip selected' : 'section-chip'}
                       style={{ flex: Math.max(0.08, item.end - item.start) }}
+                      aria-pressed={selected}
                       onClick={() => {
+                        setSection(item)
                         if (audioRef.current) audioRef.current.currentTime = item.start
                       }}
                     >
-                      {selected ? `${item.label} selected` : item.label}
+                      {item.label}
                     </button>
                   )
                 })}
@@ -329,17 +525,54 @@ export function Studio() {
         />
       </section>
 
-      <aside className="studio-side">
+      <aside className="studio-side" ref={sideRef}>
         <p className="side-label">Style</p>
-        <div className="style-value">Shapes</div>
+        <label className="style-field">
+          <select className="style-select" aria-label="Style" value={studio.style} onChange={onStyle}>
+            {STYLES.map((item) => (
+              <option key={item.id} value={item.id} disabled={!item.ready}>
+                {item.ready ? item.label : `${item.label} — Coming soon`}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <p className="side-label">Palette</p>
         <div className="swatches">
-          {palette.colors.map((color) => (
-            <span key={color} className="swatch" style={{ background: color }} />
-          ))}
-          <button type="button" className="lock-button" aria-label="Lock" disabled>
-            <LockIcon />
+          {studio.palette.swatches.map((swatch, index) => {
+            const hex = swatchHex(swatch)
+            return (
+              <div className="swatch-item" key={swatch.id}>
+                <label className="swatch" style={{ background: hex }}>
+                  <input
+                    type="color"
+                    value={hex}
+                    aria-label={`Color ${index + 1}`}
+                    onFocus={startSlide}
+                    onBlur={finishSlide}
+                    onChange={(event) => onPick(swatch.id, event.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className={swatch.locked ? 'swatch-lock locked' : 'swatch-lock'}
+                  aria-pressed={swatch.locked}
+                  aria-label={swatch.locked ? `Unlock color ${index + 1}` : `Lock color ${index + 1}`}
+                  onClick={() => onLock(swatch.id)}
+                >
+                  <LockIcon />
+                </button>
+              </div>
+            )
+          })}
+          <button
+            type="button"
+            className="add-swatch"
+            aria-label="Add a color"
+            disabled={studio.palette.swatches.length >= MAX_SWATCHES}
+            onClick={onAddColor}
+          >
+            +
           </button>
         </div>
 
@@ -353,8 +586,10 @@ export function Studio() {
           min="0"
           max="100"
           value={warmth}
-          disabled
-          onChange={() => {}}
+          onPointerDown={startSlide}
+          onPointerUp={finishSlide}
+          onPointerCancel={finishSlide}
+          onChange={onWarmth}
           aria-label="Warm to cool"
         />
 
@@ -368,14 +603,33 @@ export function Studio() {
           min="0"
           max="100"
           value={lightness}
-          disabled
-          onChange={() => {}}
+          onPointerDown={startSlide}
+          onPointerUp={finishSlide}
+          onPointerCancel={finishSlide}
+          onChange={onLightness}
           aria-label="Dark to light"
+        />
+
+        <div className="slider-labels">
+          <span>Round</span>
+          <span>Spiky</span>
+        </div>
+        <input
+          className="range"
+          type="range"
+          min="0"
+          max="100"
+          value={spiky}
+          onPointerDown={startSlide}
+          onPointerUp={finishSlide}
+          onPointerCancel={finishSlide}
+          onChange={onRoundness}
+          aria-label="Round to spiky"
         />
 
         <div className="redo">
           <p>{section ? `${section.label} selected` : 'Section'}</p>
-          <button type="button" className="button-dashed" disabled>
+          <button type="button" className="button-redo" disabled={!section} onClick={redoSection}>
             Redo this section
           </button>
         </div>
