@@ -25,6 +25,11 @@ export function mulberry32(seed) {
   }
 }
 
+export function sectionAt(sections, time) {
+  if (!sections?.length) return null
+  return sections.find((section) => time >= section.start && time < section.end) ?? sections[sections.length - 1]
+}
+
 export function sectionKey(section) {
   return `${Number(section.start).toFixed(3)}:${section.label}`
 }

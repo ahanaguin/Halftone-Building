@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   CALIBRATION_COLORS,
   SEQUENCE,
   colorsFromImages,
   colorsSoFar,
   describePick,
-  hasCalibration,
+  loadCalibration,
   paletteFromCalibration,
   resultFromAnswers,
   saveCalibration,
@@ -41,21 +41,41 @@ function PauseIcon() {
   )
 }
 
+function sameColor(left, right) {
+  return (left || '').toLowerCase() === (right || '').toLowerCase()
+}
+
+function customColors(answers) {
+  const extras = []
+  for (const answer of Object.values(answers || {})) {
+    const color = answer?.color
+    if (!color || CALIBRATION_COLORS.some((preset) => sameColor(preset, color))) continue
+    if (extras.some((item) => sameColor(item, color))) continue
+    extras.push(color)
+  }
+  return extras
+}
+
 export function Calibrate() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const saved = useRef(loadCalibration())
   const { replaceStudio, setCalibrateChrome, registerCalibrateSkip } = useTrack()
-  const [phase, setPhase] = useState('intro')
+  const [phase, setPhase] = useState(() => (location.state?.revise && saved.current?.answers ? 'questions' : 'intro'))
   const [ready, setReady] = useState(false)
   const [index, setIndex] = useState(0)
-  const [answers, setAnswers] = useState({})
-  const [extraColors, setExtraColors] = useState([])
+  const [answers, setAnswers] = useState(() => saved.current?.answers || {})
+  const [extraColors, setExtraColors] = useState(() => customColors(saved.current?.answers))
   const [images, setImages] = useState([])
   const [previews, setPreviews] = useState([])
-  const [references, setReferences] = useState([])
+  const [references, setReferences] = useState(() => saved.current?.references || [])
+  const [dismissed, setDismissed] = useState([])
   const [playing, setPlaying] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [draftColor, setDraftColor] = useState(CALIBRATION_COLORS[0])
   const audioRef = useRef(null)
   const imageRef = useRef(null)
-  const colorRef = useRef(null)
+  const hadImages = useRef(false)
 
   const sound = SEQUENCE[index]
   const pick = answers[sound.id] || {}
@@ -69,18 +89,19 @@ export function Calibrate() {
   useEffect(() => {
     const urls = images.map((file) => URL.createObjectURL(file))
     setPreviews(urls)
-    let cancel = false
-    if (images.length) {
-      colorsFromImages(images)
-        .then((colors) => {
-          if (!cancel) setReferences(colors)
-        })
-        .catch(() => {
-          if (!cancel) setReferences([])
-        })
-    } else {
-      setReferences([])
+    if (!images.length) {
+      if (hadImages.current) setReferences([])
+      return () => urls.forEach((url) => URL.revokeObjectURL(url))
     }
+    hadImages.current = true
+    let cancel = false
+    colorsFromImages(images)
+      .then((colors) => {
+        if (!cancel) setReferences(colors)
+      })
+      .catch(() => {
+        if (!cancel) setReferences([])
+      })
     return () => {
       cancel = true
       urls.forEach((url) => URL.revokeObjectURL(url))
@@ -116,8 +137,6 @@ export function Calibrate() {
     })
     return () => setCalibrateChrome(null)
   }, [phase, index, setCalibrateChrome])
-
-  if (hasCalibration()) return <Navigate to="/upload" replace />
 
   function begin() {
     if (!ready) return
@@ -159,7 +178,8 @@ export function Calibrate() {
 
   function finish(nextAnswers) {
     audioRef.current?.pause()
-    const result = resultFromAnswers(nextAnswers, references)
+    const keptReferences = references.filter((color) => !dismissed.some((item) => sameColor(item, color)))
+    const result = resultFromAnswers(nextAnswers, keptReferences)
     saveCalibration(result)
     replaceStudio({
       style: 'shapes',
@@ -189,13 +209,42 @@ export function Calibrate() {
     event.target.value = ''
   }
 
-  function addCustomColor(event) {
-    const value = event.target.value
-    setExtraColors((current) => (current.some((color) => color.toLowerCase() === value.toLowerCase()) ? current : [...current, value]))
-    choose('color', value)
+  function toggleColor(color) {
+    if (pick.color && sameColor(pick.color, color)) {
+      setAnswers((current) => ({
+        ...current,
+        [sound.id]: { ...current[sound.id], color: undefined },
+      }))
+      return
+    }
+    setDismissed((current) => current.filter((item) => !sameColor(item, color)))
+    choose('color', color)
   }
 
-  const palette = colorsSoFar(answers, references)
+  function confirmColor() {
+    const value = draftColor
+    setDismissed((current) => current.filter((item) => !sameColor(item, value)))
+    if (!CALIBRATION_COLORS.some((color) => sameColor(color, value))) {
+      setExtraColors((current) => (current.some((color) => sameColor(color, value)) ? current : [...current, value]))
+    }
+    choose('color', value)
+    setPickerOpen(false)
+  }
+
+  function removeColor(color) {
+    setDismissed((current) => (current.some((item) => sameColor(item, color)) ? current : [...current, color]))
+    setAnswers((current) => {
+      const next = {}
+      for (const [id, answer] of Object.entries(current)) {
+        next[id] = answer?.color && sameColor(answer.color, color) ? { ...answer, color: undefined } : answer
+      }
+      return next
+    })
+    setReferences((current) => current.filter((item) => !sameColor(item, color)))
+    setExtraColors((current) => current.filter((item) => !sameColor(item, color)))
+  }
+
+  const palette = colorsSoFar(answers, references).filter((color) => !dismissed.some((item) => sameColor(item, color)))
   const lowNote = describePick(answers['01-pitch-low'])
   const highNote = describePick(answers['03-pitch-high'])
   const choices = [...CALIBRATION_COLORS, ...extraColors]
@@ -235,21 +284,45 @@ export function Calibrate() {
 
             <p className="cal-label">Color</p>
             <div className="cal-colors">
-              {choices.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  className={pick.color?.toLowerCase() === color.toLowerCase() ? 'cal-dot selected' : 'cal-dot'}
-                  style={{ background: color }}
-                  aria-label={color}
-                  aria-pressed={pick.color?.toLowerCase() === color.toLowerCase()}
-                  onClick={() => choose('color', color)}
-                />
-              ))}
-              <button type="button" className="cal-dot cal-add" aria-label="Add a color" onClick={() => colorRef.current?.click()}>
+              {choices.map((color) => {
+                const selected = Boolean(pick.color && sameColor(pick.color, color))
+                return (
+                  <button
+                    key={color}
+                    type="button"
+                    className={selected ? 'cal-dot selected' : 'cal-dot'}
+                    style={{ background: color }}
+                    aria-label={selected ? `Deselect ${color}` : color}
+                    aria-pressed={selected}
+                    onClick={() => toggleColor(color)}
+                  />
+                )
+              })}
+              <button
+                type="button"
+                className="cal-dot cal-add"
+                aria-label="Add a color"
+                aria-expanded={pickerOpen}
+                onClick={() => setPickerOpen((open) => !open)}
+              >
                 +
               </button>
-              <input ref={colorRef} className="file-input" type="color" onChange={addCustomColor} />
+              {pickerOpen ? (
+                <div className="cal-picker" role="dialog" aria-label="Choose a color">
+                  <input
+                    type="color"
+                    value={draftColor}
+                    aria-label="Color draft"
+                    onChange={(event) => setDraftColor(event.target.value)}
+                  />
+                  <button type="button" className="button-outline" onClick={() => setPickerOpen(false)}>
+                    Cancel
+                  </button>
+                  <button type="button" className="button" onClick={confirmColor}>
+                    OK
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             <div className="cal-groups">
@@ -301,7 +374,12 @@ export function Calibrate() {
             <h2>Your palette so far</h2>
             <div className="cal-swatches">
               {palette.map((color) => (
-                <span key={color} className="cal-swatch" style={{ background: color }} />
+                <span key={color} className="cal-swatch-wrap">
+                  <span className="cal-swatch" style={{ background: color }} />
+                  <button type="button" className="cal-swatch-x" aria-label={`Remove ${color}`} onClick={() => removeColor(color)}>
+                    ×
+                  </button>
+                </span>
               ))}
             </div>
             {lowNote ? <p className="cal-note">Low sounds: {lowNote}</p> : null}

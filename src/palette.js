@@ -127,7 +127,6 @@ export function shiftUnlocked(swatches, warmthFrom, warmthTo, lightFrom, lightTo
   const lightDelta = lightTo - lightFrom
   if (!warmDelta && !lightDelta) return swatches
   return swatches.map((swatch) => {
-    if (swatch.locked) return swatch
     let h = swatch.h
     let s = swatch.s
     let l = swatch.l
@@ -142,7 +141,7 @@ export function shiftUnlocked(swatches, warmthFrom, warmthTo, lightFrom, lightTo
 
 export function applySectionPreset(palette, preset) {
   const swatches = palette.swatches.map((swatch, index) => {
-    if (swatch.locked || index >= preset.colors.length) return swatch
+    if (index >= preset.colors.length) return swatch
     const [red, green, blue] = hexToRgb(preset.colors[index])
     const [h, s, l] = rgbToHsl(red, green, blue)
     if (swatch.h === h && swatch.s === s && swatch.l === l) return swatch

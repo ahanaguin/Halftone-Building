@@ -250,7 +250,7 @@ export function Upload() {
         ) : null}
 
         <div className="upload-actions">
-          <Link className="button-outline" to="/calibrate">
+          <Link className="button-outline" to="/calibrate" state={{ revise: true }}>
             Back
           </Link>
           <Link className="button" to="/pick-a-style">

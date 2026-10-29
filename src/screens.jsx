@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { hasCalibration } from './calibrate.js'
+import { loadVisuals } from './visuals.js'
 import { Wordmark } from './Wordmark.jsx'
 
 function Screen({ title, lede, action, to, back, backTo }) {
@@ -53,27 +54,32 @@ export function PickStyle() {
   )
 }
 
-export function Export() {
-  return (
-    <Screen
-      title="Export"
-      lede="Save or share this visual."
-      action="View my visuals"
-      to="/visuals"
-      back="Back"
-      backTo="/studio"
-    />
-  )
-}
-
 export function MyVisuals() {
+  const visuals = loadVisuals()
   return (
-    <Screen
-      title="My visuals"
-      lede="Nothing here yet."
-      action="New visual"
-      to="/"
-    />
+    <main className="screen">
+      <div className="screen-inner visuals">
+        <h1>My visuals</h1>
+        {visuals.length ? (
+          <ul className="visual-list">
+            {visuals.map((item) => (
+              <li key={item.id}>
+                <strong>{item.fileName}</strong>
+                <span>{item.style}</span>
+                <time dateTime={new Date(item.createdAt).toISOString()}>
+                  {new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </time>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="lede">Nothing here yet.</p>
+        )}
+        <Link className="button" to="/">
+          New visual
+        </Link>
+      </div>
+    </main>
   )
 }
 

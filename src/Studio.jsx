@@ -13,7 +13,7 @@ import {
   swatchHex,
 } from './palette.js'
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
-import { sectionKey, sectionSeed } from './shapeLayout.js'
+import { sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { useTrack } from './track.jsx'
 
@@ -41,11 +41,6 @@ function fitCanvas(format, boxWidth, boxHeight) {
   return { w: Math.round(width), h: Math.round(height), frame: Math.round(boxHeight) }
 }
 
-function sectionAt(sections, time) {
-  if (!sections?.length) return null
-  return sections.find((section) => time >= section.start && time < section.end) ?? sections[sections.length - 1]
-}
-
 function PlayIcon() {
   return (
     <svg viewBox="0 0 12 12" aria-hidden="true">
@@ -58,15 +53,6 @@ function PauseIcon() {
   return (
     <svg viewBox="0 0 12 12" aria-hidden="true">
       <path d="M2.2 1.6h2.6v8.8H2.2zm5 0h2.6v8.8H7.2z" fill="currentColor" />
-    </svg>
-  )
-}
-
-function LockIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="6" y="11" width="12" height="9" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11" fill="none" stroke="currentColor" strokeWidth="1.6" />
     </svg>
   )
 }
@@ -364,18 +350,6 @@ export function Studio() {
     else editStudio(apply)
   }
 
-  function onLock(id) {
-    editStudio((current) => ({
-      ...current,
-      palette: {
-        ...current.palette,
-        swatches: current.palette.swatches.map((swatch) =>
-          swatch.id === id ? { ...swatch, locked: !swatch.locked } : swatch,
-        ),
-      },
-    }))
-  }
-
   function onAddColor() {
     editStudio((current) => {
       const swatches = current.palette.swatches
@@ -562,15 +536,6 @@ export function Studio() {
                     onChange={(event) => onPick(swatch.id, event.target.value)}
                   />
                 </label>
-                <button
-                  type="button"
-                  className={swatch.locked ? 'swatch-lock locked' : 'swatch-lock'}
-                  aria-pressed={swatch.locked}
-                  aria-label={swatch.locked ? `Unlock color ${index + 1}` : `Lock color ${index + 1}`}
-                  onClick={() => onLock(swatch.id)}
-                >
-                  <LockIcon />
-                </button>
               </div>
             )
           })}

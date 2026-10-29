@@ -1,16 +1,9 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { DesktopGate } from './DesktopGate.jsx'
 import { Calibrate } from './Calibrate.jsx'
+import { Export } from './Export.jsx'
 import { Shell } from './Shell.jsx'
-import {
-  Export,
-  HowItWorks,
-  Landing,
-  MyPalette,
-  MyVisuals,
-  PickStyle,
-  SendFeedback,
-} from './screens.jsx'
+import { HowItWorks, Landing, MyPalette, MyVisuals, PickStyle, SendFeedback } from './screens.jsx'
 import { Studio } from './Studio.jsx'
 import { TrackProvider } from './track.jsx'
 import { Upload } from './Upload.jsx'

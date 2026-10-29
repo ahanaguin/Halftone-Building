@@ -732,7 +732,6 @@ h1 {
   cursor: pointer;
 }
 
-.swatch-lock,
 .add-swatch {
   display: inline-flex;
   align-items: center;
@@ -753,16 +752,6 @@ h1 {
   height: 28px;
   font-size: 16px;
   line-height: 1;
-}
-
-.swatch-lock svg {
-  width: 12px;
-  height: 12px;
-}
-
-.swatch-lock.locked {
-  border-color: var(--text);
-  color: var(--text);
 }
 
 .add-swatch:disabled {
@@ -870,7 +859,6 @@ h1 {
 
 .button-redo:focus-visible,
 .style-select:focus-visible,
-.swatch-lock:focus-visible,
 .add-swatch:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 3px;
@@ -1225,7 +1213,37 @@ h1 {
 }
 
 .cal-colors {
+  position: relative;
   margin-top: 12px;
+}
+
+.cal-picker {
+  position: absolute;
+  z-index: 4;
+  top: 42px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #161616;
+}
+
+.cal-picker input[type='color'] {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cal-picker .button,
+.cal-picker .button-outline {
+  min-height: 36px;
+  padding: 0 14px;
 }
 
 .cal-dot,
@@ -1317,7 +1335,42 @@ h1 {
 }
 
 .cal-swatches {
+  gap: 14px;
   margin-top: 18px;
+}
+
+.cal-swatch-wrap {
+  position: relative;
+  width: 28px;
+  height: 28px;
+}
+
+.cal-swatch-wrap .cal-swatch {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+.cal-swatch-x {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.cal-swatch-wrap:hover .cal-swatch-x,
+.cal-swatch-x:focus-visible {
+  opacity: 1;
 }
 
 .cal-note {
@@ -1417,4 +1470,288 @@ h1 {
     animation: none;
     transition: none;
   }
+}
+
+.export {
+  flex: 1;
+  min-height: 0;
+  padding: 36px 40px 32px;
+}
+
+.export-inner,
+.export-empty {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.export h1,
+.export-empty h1 {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.export-lede,
+.export-empty p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.export-empty .button {
+  margin-top: 24px;
+}
+
+.export-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.export-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 560px;
+  padding: 18px 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #141414;
+}
+
+.export-card.included {
+  border-color: #8a8a86;
+}
+
+.export-stage {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 250px;
+}
+
+.export-frame {
+  position: relative;
+}
+
+.export-frame-tall {
+  width: 112px;
+  height: 200px;
+}
+
+.export-frame-square {
+  width: 168px;
+  height: 168px;
+}
+
+.export-frame-wide {
+  width: 248px;
+  height: 140px;
+}
+
+.export-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  background: #24115a;
+}
+
+.export-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.export-card h2 {
+  margin: 18px 0 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.export-card p,
+.export-time,
+.export-warn {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.export-warn {
+  color: #b7b5b0;
+}
+
+.export-field {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.export-field strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.export-select {
+  width: 100%;
+  height: 40px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0e0e0e;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.export-check {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 22px;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.export-check input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.export-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #6e6e6a;
+  border-radius: 3px;
+  background: transparent;
+  color: #111;
+}
+
+.export-mark svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0;
+}
+
+.export-check input:checked + .export-mark {
+  border-color: #fff;
+  background: #fff;
+}
+
+.export-check input:checked + .export-mark svg {
+  opacity: 1;
+}
+
+.export-check input:focus-visible + .export-mark {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+.export-check input:disabled + .export-mark {
+  opacity: 0.45;
+}
+
+.export-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  min-height: 72px;
+  margin-top: 18px;
+}
+
+.export-footer > p,
+.export-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.export-error {
+  margin-right: auto;
+  color: #e7b2a8;
+}
+
+.export-job {
+  width: min(520px, 100%);
+}
+
+.export-job-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.export-job-row p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.export-progress {
+  height: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #2a2a28;
+}
+
+.export-progress span {
+  display: block;
+  height: 100%;
+  background: #fff;
+}
+
+.visuals {
+  width: min(720px, 100%);
+}
+
+.visual-list {
+  margin: 28px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.visual-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) 1fr auto;
+  gap: 16px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.visual-list li:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.visual-list strong {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

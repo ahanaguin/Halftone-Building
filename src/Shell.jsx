@@ -61,6 +61,7 @@ export function Shell() {
   const location = useLocation()
   const { track, canUndo, undoStudio, calibrateChrome, skipCalibration } = useTrack()
   const studio = location.pathname === '/studio'
+  const exportPage = location.pathname === '/export'
   const menuRef = useRef(null)
   const closeRef = useRef(null)
 
@@ -158,6 +159,8 @@ export function Shell() {
             <button type="button" className="text-link cal-skip" onClick={skipCalibration}>
               Skip calibration &gt;
             </button>
+          ) : exportPage ? (
+            <p className="topbar-status">{track?.fileName ?? 'No track yet'}</p>
           ) : location.pathname === '/upload' ? (
             <p className="topbar-status">Palette saved</p>
           ) : null}
