@@ -59,7 +59,7 @@ function NavItems({ items }) {
 export function Shell() {
   const [open, setOpen] = useState(false)
   const location = useLocation()
-  const { track, canUndo, undoStudio } = useTrack()
+  const { track, canUndo, undoStudio, calibrateChrome, skipCalibration } = useTrack()
   const studio = location.pathname === '/studio'
   const menuRef = useRef(null)
   const closeRef = useRef(null)
@@ -134,6 +134,14 @@ export function Shell() {
             </Link>
           </div>
           {studio ? <p className="topbar-track">{track?.fileName ?? 'No track yet'}</p> : null}
+          {calibrateChrome ? (
+            <div className="cal-meter">
+              <span>{calibrateChrome.label}</span>
+              <span className="cal-meter-track" aria-hidden="true">
+                <span style={{ width: `${calibrateChrome.progress * 100}%` }} />
+              </span>
+            </div>
+          ) : null}
           {studio ? (
             <div className="studio-actions">
               <Link to="/pick-a-style" className="text-link back-styles">
@@ -146,6 +154,10 @@ export function Shell() {
                 Export
               </Link>
             </div>
+          ) : calibrateChrome ? (
+            <button type="button" className="text-link cal-skip" onClick={skipCalibration}>
+              Skip calibration &gt;
+            </button>
           ) : location.pathname === '/upload' ? (
             <p className="topbar-status">Palette saved</p>
           ) : null}

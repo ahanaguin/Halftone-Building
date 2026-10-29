@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { hasCalibration } from './calibrate.js'
 import { Wordmark } from './Wordmark.jsx'
 
 function Screen({ title, lede, action, to, back, backTo }) {
@@ -32,23 +33,10 @@ export function Landing() {
         Halftone is a free tool for independent musicians that turns your songs into animated visualizers, Spotify
         Canvas loops, and cover art, using colors and styles you choose.
       </p>
-      <Link className="button" to="/calibrate">
+      <Link className="button" to={hasCalibration() ? '/upload' : '/calibrate'}>
         New visual
       </Link>
     </main>
-  )
-}
-
-export function Calibrate() {
-  return (
-    <Screen
-      title="Calibrate"
-      lede="Match your screen before you start."
-      action="Continue"
-      to="/upload"
-      back="Back"
-      backTo="/"
-    />
   )
 }
 

@@ -1,8 +1,8 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { DesktopGate } from './DesktopGate.jsx'
+import { Calibrate } from './Calibrate.jsx'
 import { Shell } from './Shell.jsx'
 import {
-  Calibrate,
   Export,
   HowItWorks,
   Landing,

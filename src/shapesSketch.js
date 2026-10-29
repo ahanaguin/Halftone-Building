@@ -1,3 +1,4 @@
+import { shapeFill } from './calibrate.js'
 import p5 from 'p5'
 import { layoutShapes } from './shapeLayout.js'
 
@@ -49,7 +50,10 @@ export function mountShapes(node, liveRef, sizeRef) {
         p.translate(shape.x, shape.y)
         p.rotate(shape.rot)
         p.noStroke()
-        p.fill(colors[shape.index % colors.length])
+        const fill = live.groups
+          ? shapeFill(shape, live.groups, live.sectionLabel, live.references)
+          : colors[shape.index % colors.length]
+        p.fill(fill)
         p.drawingContext.globalAlpha = shape.band === 'low' ? 0.92 : 0.78
         if (shape.kind === 'circle') p.circle(0, 0, shape.size)
         else if (shape.kind === 'arc') p.arc(0, 0, shape.size, shape.size, 0, p.PI)

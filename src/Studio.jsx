@@ -100,6 +100,9 @@ export function Studio() {
     roundness: studio.roundness,
     colors: paletteColors(studio.palette),
     background: artworkColor(paletteColors(studio.palette)),
+    groups: studio.calibration?.groups ?? null,
+    references: studio.calibration?.references ?? [],
+    sectionLabel: '',
   })
 
   studioRef.current = studio
@@ -116,6 +119,9 @@ export function Studio() {
     background: artwork,
     roundness: studio.roundness,
     seed: studio.seeds[activeKey] ?? liveRef.current.seed,
+    groups: studio.calibration?.groups ?? null,
+    references: studio.calibration?.references ?? [],
+    sectionLabel: section?.label || '',
   }
 
   useEffect(() => {
@@ -218,6 +224,9 @@ export function Studio() {
         live.background = artworkColor(paletteColorsNow)
         live.roundness = studioNow.roundness
         live.seed = studioNow.seeds[key] ?? 1
+        live.groups = studioNow.calibration?.groups ?? null
+        live.references = studioNow.calibration?.references ?? []
+        live.sectionLabel = next?.label || ''
         const jumped = Math.abs(audio.currentTime - lastTime) > 0.35
         lastTime = audio.currentTime
         const graph = graphRef.current
