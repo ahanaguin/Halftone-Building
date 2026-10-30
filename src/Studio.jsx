@@ -602,8 +602,26 @@ export function Studio() {
   }
 
   function resetSection() {
-    if (!section) return
+    if (!section) {
+      showToast('No edits to clear yet.')
+      return
+    }
     const key = sectionKey(section)
+    const edit = studio.edits?.[key]
+    const edited = Boolean(
+      edit &&
+        (edit.size != null ||
+          edit.count != null ||
+          edit.colors?.length >= 2 ||
+          edit.x ||
+          edit.y ||
+          isHex(edit.background) ||
+          (edit.composition && edit.composition !== 'auto')),
+    )
+    if (!edited) {
+      showToast('No edits to clear yet.')
+      return
+    }
     editStudio((current) => {
       if (!current.edits?.[key]) return current
       const edits = { ...current.edits }
@@ -677,15 +695,6 @@ export function Studio() {
   const sectionBackground = isHex(sectionEdit.background) ? sectionEdit.background : studio.background || PAPER
   const shineOn = studio.shine !== false
   const motion = studio.speed ?? 50
-  const sectionEdited = Boolean(
-    sectionEdit.size != null ||
-      sectionEdit.count != null ||
-      sectionEdit.colors?.length >= 2 ||
-      sectionEdit.x ||
-      sectionEdit.y ||
-      isHex(sectionEdit.background) ||
-      (sectionEdit.composition && sectionEdit.composition !== 'auto'),
-  )
   const compositionUniform = Boolean(
     track?.sections?.length && track.sections.every((item) => modeOf(studio.edits?.[sectionKey(item)]) === composition),
   )
@@ -1082,8 +1091,8 @@ export function Studio() {
 
         <div className="redo">
           <p>{section ? `${section.label} selected` : 'Section'}</p>
-          <button type="button" className={section && !sectionEdited ? 'button-redo is-on' : 'button-redo'} disabled={!section || !sectionEdited} onClick={resetSection}>
-            {section && !sectionEdited ? 'Edits cleared' : 'Clear edits'}
+          <button type="button" className="button-redo" onClick={resetSection}>
+            Clear edits
           </button>
           <button type="button" className={arrangementOn ? 'button-redo is-on' : 'button-redo'} disabled={!section} onClick={redoSection}>
             {arrangementOn ? 'Arrangement updated' : 'New arrangement'}

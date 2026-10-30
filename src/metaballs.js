@@ -239,6 +239,14 @@ function gatherFor(label) {
   return -0.12
 }
 
+function livelyKind(kind) {
+  return kind === 'Build' || kind === 'Main' || kind === 'High' || kind === 'Drop' || kind === 'Peak'
+}
+
+function radialFloor(kind) {
+  return livelyKind(kind) ? 1 : 0.62
+}
+
 function smoothToward(current, target, dt, tau) {
   const amount = 1 - Math.exp(-dt / tau)
   return current + (target - current) * amount
@@ -260,7 +268,7 @@ function sectionParams(spec, section, sections) {
     seed,
     label: section?.label || 'Quiet',
     count: shapeCount(recipe, edit?.count, edit?.composition || 'auto'),
-    scale: shapeScale(edit?.size),
+    scale: shapeScale(edit?.size, resolveMode(section?.label || spec.sectionLabel, edit?.composition)),
     offsetX: edit?.x || 0,
     offsetY: edit?.y || 0,
     composition: edit?.composition || 'auto',
@@ -369,23 +377,29 @@ function projectHome(blob, mode, aspect = 1, groups = 1, expand = 1) {
     return { x: -clamp(along, 0.02, 0.26), y: -clamp(across, 0.02, 0.26) }
   }
   if (mode === 'radial') {
-    const reach = layerReach(blob.group, groups) * expand
-    const radius = (0.055 + blob.slot * 0.026) * reach
-    const spine = WEDGE * 0.7
-    const spread = (blob.slot % 3) * 0.014
-    const angle = clamp(spine - spread, 0.2, WEDGE - 0.025)
+    const open = expand?.open ?? 1
+    const petal = expand?.petal ?? 1
+    const layerVar = expand?.layer ?? 1
+    const drop = expand?.drop ?? 1
+    const reach = layerReach(blob.group, groups)
+    const spaced = Math.pow(Math.max(0.2, reach), layerVar)
+    const length = petal * (blob.droplet ? drop : 1)
+    const radius = (0.068 + blob.slot * 0.032) * spaced * length * open
+    const spine = WEDGE * (0.58 + 0.18 * petal)
+    const spread = (blob.slot % 3) * (0.008 + 0.012 * drop)
+    const angle = clamp(spine - spread, 0.16, WEDGE - 0.02)
     return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
   }
   if (mode === 'grid') return gridHome(blob, aspect)
   return { x: clamp(x, -0.2, 0.2), y: clamp(y, -0.2, 0.2) }
 }
 
-function blendedHome(blob, state, groups = 1, expand = 1) {
+function blendedHome(blob, state, groups = 1, radial = null) {
   const aspect = state.aspect || 1
-  const fromExpand = state.modeFrom === 'radial' ? expand : 1
-  const toExpand = state.mode === 'radial' ? expand : 1
-  const from = projectHome(blob, state.modeFrom || 'free', aspect, groups, fromExpand)
-  const to = projectHome(blob, state.mode || 'free', aspect, groups, toExpand)
+  const fromRadial = state.modeFrom === 'radial' ? radial : null
+  const toRadial = state.mode === 'radial' ? radial : null
+  const from = projectHome(blob, state.modeFrom || 'free', aspect, groups, fromRadial)
+  const to = projectHome(blob, state.mode || 'free', aspect, groups, toRadial)
   const t = state.fold ?? 1
   return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }
 }
@@ -397,6 +411,8 @@ function createState(spec) {
   const mode = resolveMode(first?.label, edit?.composition)
   const aspect = spec.width > 0 && spec.height > 0 ? spec.width / spec.height : 1
   const rand = mulberry32((seedFor(spec, first, sections) || 1) ^ 0x5eed)
+  const open0 = radialFloor(labelKind(first?.label))
+  const radial0 = { open: open0, petal: 1, layer: 1, drop: 1 }
   const blobs = []
   for (let group = 0; group < GROUPS; group += 1) {
     const baseAngle = group * 2.399 + (rand() - 0.5) * 0.35
@@ -419,7 +435,7 @@ function createState(spec) {
         droplet: slot >= 3,
         phase: rand() * Math.PI * 2,
       }
-      const home = projectHome(blob, mode, aspect)
+      const home = projectHome(blob, mode, aspect, 1, mode === 'radial' ? radial0 : null)
       blob.x = home.x
       blob.y = home.y
       blob.homeX = home.x
@@ -446,6 +462,17 @@ function createState(spec) {
     dropping: false,
     shine: 0,
     shinePos: -1,
+    open: open0,
+    openHold: 0,
+    petalVar: 1,
+    layerVar: 1,
+    dropVar: 1,
+    petalTarget: 1,
+    layerTarget: 1,
+    dropTarget: 1,
+    varyAge: 0,
+    vary: ((seedFor(spec, first, sections) || 1) ^ 0x51f) >>> 0,
+    sectionLabel: first?.label || '',
   }
 }
 
@@ -504,6 +531,49 @@ function shownShare(count, groups) {
   return Math.min(PER_GROUP, Math.max(0, count) / used, MAX_BLOBS / used)
 }
 
+function varyRadial(state, salt) {
+  state.vary = (Math.imul((state.vary || 1) ^ (salt + 1), 1664525) + 1013904223) >>> 0
+  const rand = mulberry32(state.vary)
+  state.petalTarget = 0.9 + rand() * 0.2
+  state.layerTarget = 0.78 + rand() * 0.44
+  state.dropTarget = 0.84 + rand() * 0.32
+  state.varyAge = 0
+}
+
+function advanceRadial(state, spec, params, dt, time, strongBeat, dropEdge) {
+  const kind = labelKind(params.label)
+  const floor = radialFloor(kind)
+  const lively = floor >= 1
+  const beatLen = 60 / Math.max(40, spec.tempo || 100)
+  const beatIndex = Math.floor(time / beatLen)
+  state.varyAge = (state.varyAge || 0) + dt
+  const energetic = Math.max(state.bass, state.loud) > 0.5
+  const pulse = strongBeat || dropEdge || (energetic && !state.wasEnergetic)
+  state.wasEnergetic = energetic
+  if (state.sectionLabel !== params.label) {
+    const entered = state.sectionLabel != null && state.sectionLabel !== ''
+    state.sectionLabel = params.label
+    if (entered) varyRadial(state, beatIndex + params.label.length * 17)
+  }
+  if (pulse && ((state.openHold || 0) <= 0 || state.varyAge > 2.6)) varyRadial(state, beatIndex)
+  if (pulse) {
+    const roll = mulberry32(((state.vary || 1) ^ (beatIndex + 3)) >>> 0)()
+    const push = dropEdge ? 1.3 : lively ? 1.24 : 1
+    state.openGoal = Math.max(state.openGoal || floor, push)
+    state.openHold = Math.max(state.openHold || 0, 2 + roll * 2)
+  }
+  state.petalVar = smoothToward(state.petalVar || 1, state.petalTarget || 1, dt, 0.75)
+  state.layerVar = smoothToward(state.layerVar || 1, state.layerTarget || 1, dt, 0.75)
+  state.dropVar = smoothToward(state.dropVar || 1, state.dropTarget || 1, dt, 0.75)
+  const held = (state.openHold || 0) > 0
+  const goal = held ? Math.max(floor, state.openGoal || floor) : floor
+  const opening = held && goal > (state.open || floor)
+  state.open = smoothToward(state.open || floor, goal, dt, opening ? 0.35 : 1.4)
+  if (held) state.openHold = Math.max(0, state.openHold - dt)
+  else state.openGoal = floor
+  if (state.open < floor) state.open = floor
+}
+
 function step(state, time, dt, spec) {
   const params = paramsAt(spec, time)
   const tune = tuneOf(spec)
@@ -544,10 +614,12 @@ function step(state, time, dt, spec) {
   const motion = motionOf(spec)
   const mdt = dt * motion
   state.spin += mdt * 0.16 * tempo * tune.spin
+  let dropEdge = false
   if (labelKind(params.label) === 'Drop') {
-    if (!state.dropping) state.burst = 1
+    if (!state.dropping) dropEdge = true
     state.dropping = true
   } else state.dropping = false
+  if (strongBeat || dropEdge) state.burst = 1
   const earlier = time - dt
   const dropTimes = biggestDropTimes(spec)
   for (let index = 0; index < dropTimes.length; index += 1) {
@@ -566,12 +638,21 @@ function step(state, time, dt, spec) {
   const groups = Math.max(1, params.colors.length)
   const share = shownShare(params.count, groups)
   const radialNow = state.mode === 'radial' || state.modeFrom === 'radial'
-  const expand = 1 + (radialNow ? state.burst * 0.28 : 0)
+  if (radialNow) advanceRadial(state, spec, params, dt, time, strongBeat, dropEdge)
+  const radial = {
+    open: state.open || 1,
+    petal: state.petalVar || 1,
+    layer: state.layerVar || 1,
+    drop: state.dropVar || 1,
+  }
   const shown = []
   for (const blob of state.blobs) {
-    blob.layer = layerReach(blob.group, groups)
-    blob.expand = expand
-    const home = blendedHome(blob, state, groups, expand)
+    const reach = layerReach(blob.group, groups)
+    const spaced = Math.pow(Math.max(0.2, reach), radial.layer)
+    const length = radial.petal * (blob.droplet ? radial.drop : 1)
+    blob.layer = spaced * length
+    blob.expand = radialNow ? radial.open : 1
+    const home = blendedHome(blob, state, groups, radialNow ? radial : null)
     blob.homeX = home.x
     blob.homeY = home.y
     if (blob.group < groups && blob.slot < share) shown.push(blob)
@@ -597,7 +678,7 @@ function step(state, time, dt, spec) {
         : region === 'radial' ? 1.15 : 1.45
       const rest = same ? (shown[i].r + shown[j].r) * sameRest : differentRest
       const falloff = Math.exp(-Math.max(0, dist - rest) * 1.15)
-      const pull = (same ? 1.15 : 0.34) * attract * (region === 'radial' ? 0.15 : region === 'grid' ? 0.35 : 1)
+      const pull = (same ? 1.15 : 0.34) * attract * (region === 'radial' ? 0.04 : region === 'grid' ? 0.35 : 1)
       const accel = (dist - rest) * pull * falloff
       const ux = dx / dist
       const uy = dy / dist
@@ -636,7 +717,9 @@ function step(state, time, dt, spec) {
     const burstEase = region === 'radial' ? state.burst : 0
     const hold = region === 'grid'
       ? 0.14 + (1 - state.bass) * 0.1
-      : (0.62 - state.gather * 0.4) * (blob.droplet ? 1 - state.split * 0.7 : 1) * (1 - burstEase * 0.85) * (region === 'radial' ? 2.3 : 1)
+      : region === 'radial'
+        ? 1.85 * (blob.droplet ? 0.8 : 1)
+        : (0.62 - state.gather * 0.4) * (blob.droplet ? 1 - state.split * 0.7 : 1) * (1 - burstEase * 0.85)
     blob.vx += (blob.homeX - blob.x) * hold * mdt
     blob.vy += (blob.homeY - blob.y) * hold * mdt
     if (region !== 'radial' && region !== 'grid') {
@@ -650,11 +733,9 @@ function step(state, time, dt, spec) {
     }
     if (region === 'radial') {
       const radius = Math.hypot(blob.x, blob.y) + 0.001
-      const ux = blob.x / radius
-      const uy = blob.y / radius
-      const inward = state.bass * 0.4 * (1 - state.burst) - state.burst * 0.55
-      blob.vx -= ux * inward * mdt
-      blob.vy -= uy * inward * mdt
+      const extra = Math.max(0, (state.open || 1) - 1) * 0.22
+      blob.vx += (blob.x / radius) * extra * mdt
+      blob.vy += (blob.y / radius) * extra * mdt
     }
     if (blob.droplet) {
       const parent = state.blobs[blob.parent]
@@ -685,11 +766,12 @@ function step(state, time, dt, spec) {
         blob.vy += (dy / dist) * outward * mdt
       } else {
         const radius = Math.hypot(blob.x, blob.y) + 0.001
-        const out = state.split * 0.7 * tempo + state.burst * 1.7
+        const out = state.split * 0.35 * tempo + Math.max(0, (state.open || 1) - 1) * 0.7 + state.burst * 0.22
         blob.vx += (blob.x / radius) * out * mdt
         blob.vy += (blob.y / radius) * out * mdt
-        blob.vx += (parent.x - blob.x) * state.bass * (1 - state.burst) * 0.6 * mdt
-        blob.vy += (parent.y - blob.y) * state.bass * (1 - state.burst) * 0.6 * mdt
+        const reel = (state.openHold || 0) > 0 ? 0.08 : 0.2
+        blob.vx += (parent.x - blob.x) * reel * mdt
+        blob.vy += (parent.y - blob.y) * reel * mdt
       }
     }
     const walled = state.mode === 'grid' ? 'grid' : state.fold > 0.82 ? region : 'travel'
@@ -741,14 +823,15 @@ function soften(blob, mode, dt, aspect = 1) {
     if (blob.y < -0.26) blob.vy += (-0.26 - blob.y) * gain * dt
   }
   if (mode === 'radial') {
-    const scale = (blob.layer || 1) * (blob.expand || 1)
+    const homeR = Math.hypot(blob.homeX || 0, blob.homeY || 0)
+    const cap = Math.min(0.48, Math.max(homeR * 1.12, 0.05))
     const radius = Math.hypot(blob.x, blob.y) + 0.0001
     let angle = Math.atan2(blob.y, blob.x)
     const innerA = 0.18
     let targetA = angle
     if (angle < innerA) targetA = innerA
     else if (angle > WEDGE - 0.02) targetA = WEDGE - 0.02
-    const targetR = clamp(radius, 0.02 * scale, 0.34 * scale)
+    const targetR = clamp(radius, Math.max(0.02, homeR * 0.7), cap)
     if (targetA !== angle || Math.abs(targetR - radius) > 0.0001) {
       blob.vx += (Math.cos(targetA) * targetR - blob.x) * gain * dt
       blob.vy += (Math.sin(targetA) * targetR - blob.y) * gain * dt
@@ -779,12 +862,13 @@ function contain(blob, mode, aspect = 1) {
     return
   }
   if (mode === 'radial') {
-    const scale = (blob.layer || 1) * (blob.expand || 1)
+    const homeR = Math.hypot(blob.homeX || 0, blob.homeY || 0)
+    const cap = Math.min(0.48, Math.max(homeR * 1.12, 0.05))
     let radius = Math.hypot(blob.x, blob.y)
     let angle = Math.atan2(blob.y, blob.x)
     if (angle < 0.16) angle = 0.16
     else if (angle > WEDGE - 0.02) angle = WEDGE - 0.02
-    radius = clamp(radius, 0.02 * scale, 0.34 * scale)
+    radius = clamp(radius, Math.max(0.02, homeR * 0.7), cap)
     blob.x = Math.cos(angle) * radius
     blob.y = Math.sin(angle) * radius
     return
@@ -860,11 +944,16 @@ function blobPixels(spec, state, width, height, bufferWidth, bufferHeight) {
   for (const blob of state.blobs) {
     if (blob.group >= groups || blob.slot >= share || count >= MAX_BLOBS) continue
     const fade = blob.slot + 1 <= share ? 1 : Math.max(0, share - blob.slot)
-    const petal = state.mode === 'radial' ? 0.92 * layerReach(blob.group, groups) : state.mode === 'grid' ? (blob.droplet ? 0.95 : 1.18) : 1
-    const radius = blob.r * unit * params.scale * fade * petal
+    const gain = params.scale || 1
+    const petal = state.mode === 'radial'
+      ? 0.92 * Math.pow(layerReach(blob.group, groups), state.layerVar || 1) * (state.petalVar || 1)
+      : state.mode === 'grid'
+        ? (blob.droplet ? 0.95 : 1.18)
+        : 1
+    const radius = blob.r * unit * gain * fade * petal
     if (radius < 0.5) continue
-    let x = originX + blob.x * unit
-    let y = originY + blob.y * unit
+    let x = originX + blob.x * unit * gain
+    let y = originY + blob.y * unit * gain
     if (!symmetric) {
       const margin = radius * spread * 0.62
       x = clamp(x, margin, Math.max(margin, width - margin))

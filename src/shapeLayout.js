@@ -340,9 +340,24 @@ export const SHAPE_RANGE = {
 
 export const GRID_COUNT = { min: 4, max: 40, count: 14 }
 
-export function shapeScale(size) {
-  if (size == null) return 1
-  return 0.62 + (Math.min(100, Math.max(0, size)) / 100) * 0.76
+// Fraction of the shorter canvas side each composition fills at the default size.
+// Slider 50 keeps that look; 0 and 100 land near 15% and 90%.
+const SIZE_BASE = {
+  free: 0.51,
+  mirror: 0.61,
+  quad: 0.69,
+  radial: 0.63,
+  grid: 0.88,
+}
+
+export function shapeScale(size, mode) {
+  const t = size == null ? 0.5 : Math.min(100, Math.max(0, size)) / 100
+  if (Math.abs(t - 0.5) < 1e-6) return 1
+  const base = SIZE_BASE[mode] || SIZE_BASE.mirror
+  const minGain = 0.15 / base
+  const maxGain = 0.9 / base
+  if (t < 0.5) return minGain + (1 - minGain) * (t / 0.5)
+  return 1 + (maxGain - 1) * ((t - 0.5) / 0.5)
 }
 
 export function shapeCount(recipe, count, composition) {

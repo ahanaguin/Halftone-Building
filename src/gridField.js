@@ -1001,9 +1001,9 @@ function bufferSize(ctx, width, height) {
 function upload(state, spec, width, height) {
   const params = paramsAt(spec, spec.time || 0)
   const dims = gridDims(width, height)
-  const scale = params.scale || 1
+  const gain = params.scale || 1
   const cell = Math.min(width / dims.cols, height / dims.rows)
-  const gutter = cell * clamp(0.1 / scale, 0.05, 0.16)
+  const gutter = cell * 0.1
   const roundness = clamp(spec.roundness ?? 0.7, 0, 1)
   const offsetX = (params.offsetX || 0) * width
   const offsetY = (params.offsetY || 0) * height
@@ -1097,6 +1097,32 @@ function upload(state, spec, width, height) {
     info[count * 4 + 3] = thin / 2
     count += 1
   }
+  if (count > 0 && Math.abs(gain - 1) > 0.0001) {
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (let index = 0; index < count; index += 1) {
+      const cx = rects[index * 4]
+      const cy = rects[index * 4 + 1]
+      const hw = rects[index * 4 + 2]
+      const hh = rects[index * 4 + 3]
+      minX = Math.min(minX, cx - hw)
+      maxX = Math.max(maxX, cx + hw)
+      minY = Math.min(minY, cy - hh)
+      maxY = Math.max(maxY, cy + hh)
+    }
+    const anchorX = (minX + maxX) / 2
+    const anchorY = (minY + maxY) / 2
+    for (let index = 0; index < count; index += 1) {
+      rects[index * 4] = anchorX + (rects[index * 4] - anchorX) * gain
+      rects[index * 4 + 1] = anchorY + (rects[index * 4 + 1] - anchorY) * gain
+      rects[index * 4 + 2] *= gain
+      rects[index * 4 + 3] *= gain
+      info[index * 4] *= gain
+      info[index * 4 + 3] *= gain
+    }
+  }
   const colors = new Float32Array(8 * 3)
   const palette = params.colors?.length ? params.colors : ['#3a96d6', '#e24a3b']
   const roles = rolePalette(palette, paperHex(spec))
@@ -1112,7 +1138,7 @@ function upload(state, spec, width, height) {
     colors,
     count,
     groups: 4,
-    fillet,
+    fillet: fillet * gain,
     stripe: 0.66,
   }
 }
