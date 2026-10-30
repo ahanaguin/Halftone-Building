@@ -10,7 +10,7 @@ import {
   swatchHex,
 } from './palette.js'
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
-import { PAPER, SHAPE_RANGE, explainPoster, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
 import { useTrack } from './track.jsx'
@@ -65,6 +65,9 @@ export function Studio() {
   const [audioUrl, setAudioUrl] = useState('')
   const [size, setSize] = useState({ w: 640, h: 360, frame: 420 })
   const [tuneOpen, setTuneOpen] = useState(false)
+  const [toast, setToast] = useState('')
+  const [arrangementAck, setArrangementAck] = useState(null)
+  const toastTimer = useRef(null)
   const slotRef = useRef(null)
   const sideRef = useRef(null)
   const holderRef = useRef(null)
@@ -95,7 +98,7 @@ export function Studio() {
     profile: profileRef.current,
     sectionLabel: '',
     tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
-    background: studio.background || PAPER,
+    background: backgroundAt({ background: studio.background, edits: studio.edits || {}, sections: track?.sections || [] }, audioRef.current?.currentTime || section?.start || 0),
     shine: studio.shine !== false,
     speed: studio.speed ?? 50,
   })
@@ -120,7 +123,7 @@ export function Studio() {
     profile: profileRef.current,
     sectionLabel: section?.label || '',
     tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
-    background: studio.background || PAPER,
+    background: backgroundAt({ background: studio.background, edits: studio.edits || {}, sections: track?.sections || [] }, audioRef.current?.currentTime || section?.start || 0),
     shine: studio.shine !== false,
     speed: studio.speed ?? 50,
   }
@@ -221,7 +224,8 @@ export function Studio() {
         live.profile = profile
         live.sectionLabel = next?.label || ''
         live.tune = { ...TUNE_DEFAULTS, ...(studioNow.tune || {}) }
-        live.background = studioNow.background || PAPER
+        live.background = backgroundAt({ background: studioNow.background, edits: studioNow.edits || {}, sections: currentTrack.sections || [] }, audio.currentTime)
+        if (holderRef.current) holderRef.current.style.background = live.background
         live.shine = studioNow.shine !== false
         live.speed = studioNow.speed ?? 50
         const shown = pickRecipe(live.seed, live.sectionLabel || 'Quiet', live.roundness ?? 0.7)
@@ -423,13 +427,22 @@ export function Studio() {
     editStudio((current) => (current.style === style ? current : { ...current, style }))
   }
 
+  function showToast(message) {
+    setToast(message)
+    window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(''), 2200)
+  }
+
   function redoSection() {
     if (!section) return
     const key = sectionKey(section)
+    const next = (Math.random() * 0x100000000) >>> 0
     editStudio((current) => ({
       ...current,
-      seeds: { ...current.seeds, [key]: (Math.random() * 0x100000000) >>> 0 },
+      seeds: { ...current.seeds, [key]: next },
     }))
+    setArrangementAck({ key, seed: next })
+    showToast('New arrangement made.')
   }
 
   function writeSection(patch) {
@@ -453,13 +466,17 @@ export function Studio() {
   }
 
   function onComposition(event) {
+    setArrangementAck(null)
     writeSection({ composition: event.target.value })
+  }
+
+  function modeOf(edit) {
+    return ['free', 'mirror', 'quad', 'radial', 'grid'].includes(edit?.composition) ? edit.composition : 'auto'
   }
 
   function applyComposition() {
     if (!track?.sections?.length) return
-    const saved = studio.edits?.[activeKey]?.composition
-    const mode = ['free', 'mirror', 'quad', 'radial', 'grid'].includes(saved) ? saved : 'auto'
+    const mode = modeOf(studio.edits?.[activeKey])
     editStudio((current) => {
       const edits = { ...(current.edits || {}) }
       let changed = false
@@ -472,13 +489,30 @@ export function Studio() {
       }
       return changed ? { ...current, edits } : current
     })
+    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', grid: 'Grid' }[mode]
+    showToast(`${name} applied to all sections.`)
   }
 
-  function onBackground(event) {
-    const value = event.target.value
-    const apply = (current) => (current.background === value ? current : { ...current, background: value })
-    if (slideOrigin.current) syncStudio(apply)
-    else editStudio(apply)
+  function onSectionBackground(value) {
+    writeSection({ background: value })
+  }
+
+  function applyBackground() {
+    if (!track?.sections?.length) return
+    const hex = isHex(studio.edits?.[activeKey]?.background) ? studio.edits[activeKey].background : studio.background || PAPER
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of track.sections) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        if ((previous.background || '').toLowerCase() === hex.toLowerCase()) continue
+        edits[key] = { ...previous, background: hex }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    showToast('Background applied to all sections.')
   }
 
   function onShine() {
@@ -530,6 +564,8 @@ export function Studio() {
       delete edits[key]
       return { ...current, edits }
     })
+    setArrangementAck(null)
+    showToast('Edits cleared.')
   }
 
   function onPlaceDown(event) {
@@ -590,7 +626,8 @@ export function Studio() {
   const perMax = Math.min(8, Math.max(4, Math.floor(32 / colorGroups)))
   const perColor = Math.min(perMax, Math.max(4, Math.round(countValue / colorGroups)))
   const tune = { ...TUNE_DEFAULTS, ...(studio.tune || {}) }
-  const background = studio.background || PAPER
+  const background = backgroundAt({ background: studio.background, edits: studio.edits || {}, sections: track?.sections || [] }, audioRef.current?.currentTime || section?.start || 0)
+  const sectionBackground = isHex(sectionEdit.background) ? sectionEdit.background : studio.background || PAPER
   const shineOn = studio.shine !== false
   const motion = studio.speed ?? 50
   const composition = ['free', 'mirror', 'quad', 'radial', 'grid'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
@@ -600,8 +637,26 @@ export function Studio() {
       sectionEdit.colors?.length >= 2 ||
       sectionEdit.x ||
       sectionEdit.y ||
+      isHex(sectionEdit.background) ||
       (sectionEdit.composition && sectionEdit.composition !== 'auto'),
   )
+  const compositionApplied = Boolean(
+    track?.sections?.length && track.sections.every((item) => modeOf(studio.edits?.[sectionKey(item)]) === composition),
+  )
+  const backgroundApplied = Boolean(
+    track?.sections?.length &&
+      track.sections.every((item) => {
+        const saved = studio.edits?.[sectionKey(item)]?.background
+        const hex = isHex(saved) ? saved : studio.background || PAPER
+        return hex.toLowerCase() === sectionBackground.toLowerCase()
+      }),
+  )
+  const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
+  const backgroundChoices = [
+    { hex: PAPER, label: 'Off-white' },
+    { hex: '#111111', label: 'Near-black' },
+    ...studio.palette.swatches.map((swatch, index) => ({ hex: swatchHex(swatch), label: `Color ${index + 1}` })),
+  ]
 
   return (
     <main className="studio">
@@ -755,8 +810,48 @@ export function Studio() {
                 <option value="grid">Grid</option>
               </select>
             </label>
-            <button type="button" className="button-redo apply-all" disabled={!section || !track?.sections?.length} onClick={applyComposition}>
-              Apply to all sections
+            <button
+              type="button"
+              className={compositionApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+              disabled={!section || !track?.sections?.length}
+              onClick={applyComposition}
+            >
+              {compositionApplied ? 'Applied to all sections' : 'Apply to all sections'}
+            </button>
+            <p className="side-label">Background</p>
+            <div className="bg-choices" role="listbox" aria-label="Background">
+              {backgroundChoices.map((choice) => {
+                const selected = choice.hex.toLowerCase() === sectionBackground.toLowerCase()
+                return (
+                  <button
+                    key={choice.label}
+                    type="button"
+                    className={selected ? 'bg-choice is-on' : 'bg-choice'}
+                    style={{ background: choice.hex }}
+                    aria-label={choice.label}
+                    aria-selected={selected}
+                    disabled={!section}
+                    onClick={() => onSectionBackground(choice.hex)}
+                  />
+                )
+              })}
+              <label className={backgroundChoices.some((choice) => choice.hex.toLowerCase() === sectionBackground.toLowerCase()) ? 'bg-choice bg-custom' : 'bg-choice bg-custom is-on'} style={{ background: sectionBackground }}>
+                <input
+                  type="color"
+                  value={sectionBackground}
+                  aria-label="Custom background color"
+                  disabled={!section}
+                  onChange={(event) => onSectionBackground(event.target.value)}
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              className={backgroundApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+              disabled={!section || !track?.sections?.length}
+              onClick={applyBackground}
+            >
+              {backgroundApplied ? 'Applied to all sections' : 'Apply to all sections'}
             </button>
           </>
         ) : null}
@@ -860,20 +955,6 @@ export function Studio() {
         />
 
         <div className="background-row">
-          <p className="side-label">Background</p>
-          <label className="swatch" style={{ background }}>
-            <input
-              type="color"
-              value={background}
-              aria-label="Background color"
-              onFocus={startSlide}
-              onBlur={finishSlide}
-              onChange={onBackground}
-            />
-          </label>
-        </div>
-
-        <div className="background-row">
           <p className="side-label">Drop shine</p>
           <button
             type="button"
@@ -946,14 +1027,15 @@ export function Studio() {
 
         <div className="redo">
           <p>{section ? `${section.label} selected` : 'Section'}</p>
-          <button type="button" className="button-redo" disabled={!section || !sectionEdited} onClick={resetSection}>
-            Clear edits
+          <button type="button" className={section && !sectionEdited ? 'button-redo is-on' : 'button-redo'} disabled={!section || !sectionEdited} onClick={resetSection}>
+            {section && !sectionEdited ? 'Edits cleared' : 'Clear edits'}
           </button>
-          <button type="button" className="button-redo" disabled={!section} onClick={redoSection}>
-            New arrangement
+          <button type="button" className={arrangementOn ? 'button-redo is-on' : 'button-redo'} disabled={!section} onClick={redoSection}>
+            {arrangementOn ? 'Arrangement updated' : 'New arrangement'}
           </button>
         </div>
       </aside>
+      {toast ? <p className="side-toast" role="status">{toast}</p> : null}
       {tuneOpen ? (
         <aside className="debug-panel tune-panel" aria-label="Tuning">
           <p className="tune-title">Tuning</p>

@@ -753,6 +753,63 @@ h1 {
   margin-top: 8px;
 }
 
+.button-redo.is-on {
+  background: #fff;
+  color: #111;
+  border-color: #fff;
+}
+
+.bg-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bg-choice {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.bg-choice.is-on {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.bg-choice:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.bg-custom {
+  position: relative;
+  overflow: hidden;
+}
+
+.bg-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.side-toast {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 20;
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 999px;
+  background: #fff;
+  color: #111;
+  font-size: 13px;
+}
+
 .style-select {
   width: 100%;
   padding: 12px 36px 12px 14px;

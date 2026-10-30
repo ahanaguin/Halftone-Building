@@ -30,6 +30,43 @@ export function sectionKey(section) {
   return `${Number(section.start).toFixed(3)}:${section.label}`
 }
 
+export function isHex(value) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
+}
+
+export function mixHex(from, to, amount) {
+  const start = hexToRgb(from)
+  const end = hexToRgb(to)
+  const channel = (index) => Math.round(start[index] + (end[index] - start[index]) * clamp(amount, 0, 1)).toString(16).padStart(2, '0')
+  return `#${channel(0)}${channel(1)}${channel(2)}`
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
+export function sectionBackground(spec, section) {
+  const fallback = isHex(spec?.background) ? spec.background : PAPER
+  if (!section) return fallback
+  const saved = spec?.edits?.[sectionKey(section)]?.background
+  return isHex(saved) ? saved : fallback
+}
+
+export function backgroundAt(spec, time) {
+  const sections = spec?.sections || []
+  if (!sections.length) return sectionBackground(spec, null)
+  const now = Math.max(0, time || 0)
+  const fade = 1.5
+  for (let index = 1; index < sections.length; index += 1) {
+    const boundary = sections[index].start
+    const begin = boundary - fade
+    if (now < begin || now >= boundary) continue
+    const eased = ((now - begin) / fade) ** 2 * (3 - 2 * ((now - begin) / fade))
+    return mixHex(sectionBackground(spec, sections[index - 1]), sectionBackground(spec, sections[index]), eased)
+  }
+  return sectionBackground(spec, sectionAt(sections, now) || sections[0])
+}
+
 export function sectionSeed(section, index) {
   let hash = 2166136261
   const text = `${index}:${sectionKey(section)}`

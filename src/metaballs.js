@@ -806,13 +806,17 @@ function paperHex(spec) {
   return typeof spec.background === 'string' && /^#[0-9a-fA-F]{6}$/.test(spec.background) ? spec.background : PAPER
 }
 
-function rgbOf(color) {
-  if (typeof color === 'string' && color.startsWith('rgb')) {
-    const parts = color.match(/\d+/g) || [0, 0, 0]
-    return liftColor(Number(parts[0]), Number(parts[1]), Number(parts[2]))
-  }
-  const [red, green, blue] = hexToRgb(color)
-  return liftColor(red, green, blue)
+function rgbOf(color, paper) {
+  const lifted = typeof color === 'string' && color.startsWith('rgb')
+    ? liftColor(...((color.match(/\d+/g) || [0, 0, 0]).map(Number)))
+    : liftColor(...hexToRgb(color))
+  if (!paper) return lifted
+  const [hue, saturation, lightness] = rgbToHsl(lifted[0] * 255, lifted[1] * 255, lifted[2] * 255)
+  const ground = rgbToHsl(...hexToRgb(paper))[2]
+  if (Math.abs(lightness - ground) >= 0.2) return lifted
+  const next = ground > 0.55 ? Math.min(lightness, ground - 0.32) : Math.max(lightness, ground + 0.32)
+  const [red, green, blue] = hexToRgb(hslToHex(hue, saturation, Math.min(0.9, Math.max(0.1, next))))
+  return [red / 255, green / 255, blue / 255]
 }
 
 function blobPixels(spec, state, width, height, bufferWidth, bufferHeight) {
@@ -853,7 +857,7 @@ function blobPixels(spec, state, width, height, bufferWidth, bufferHeight) {
   }
   const colors = new Float32Array(GROUPS * 3)
   for (let group = 0; group < GROUPS; group += 1) {
-    const rgb = rgbOf(params.colors[group % params.colors.length])
+    const rgb = rgbOf(params.colors[group % params.colors.length], paperHex(spec))
     colors[group * 3] = rgb[0]
     colors[group * 3 + 1] = rgb[1]
     colors[group * 3 + 2] = rgb[2]

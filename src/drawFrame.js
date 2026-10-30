@@ -2,7 +2,7 @@ import { paletteColors, swatchHex } from './palette.js'
 import { frameMode, paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
 import { paintGrid } from './gridField.js'
 import { metricsAt } from './profileTrack.js'
-import { PAPER, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { PAPER, backgroundAt, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 
 let grainCanvas = null
 
@@ -18,7 +18,7 @@ function grainSource() {
   const data = image.data
   for (let index = 0; index < data.length; index += 4) {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0
-    const tone = 112 + (state % 48)
+    const tone = 86 + (state % 92)
     data[index] = tone
     data[index + 1] = tone
     data[index + 2] = tone
@@ -33,7 +33,7 @@ function paintGrain(ctx, width, height) {
   const transform = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null
   ctx.save()
   ctx.globalCompositeOperation = 'overlay'
-  ctx.globalAlpha = 0.12
+  ctx.globalAlpha = 0.22
   ctx.fillStyle = ctx.createPattern(grainSource(), 'repeat')
   if (transform) {
     ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -77,7 +77,7 @@ export function frameInput({ track, studio, profile, time, width, height }) {
     colors,
     palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
     tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
-    background: studio.background || PAPER,
+    background: backgroundAt({ background: studio.background, edits: studio.edits || {}, sections }, time),
     shine: studio.shine !== false,
     speed: studio.speed ?? 50,
     sectionLabel: section?.label || '',
