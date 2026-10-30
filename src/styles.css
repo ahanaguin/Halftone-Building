@@ -853,7 +853,7 @@ h1 {
 }
 
 .background-swatches + .apply-all {
-  margin-top: 8px;
+  margin-top: 16px;
 }
 
 button.swatch {

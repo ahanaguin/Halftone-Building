@@ -70,13 +70,13 @@ float edgeOf(float field) {
   return smoothstep(uThreshold - width, uThreshold + width, field);
 }
 
-vec2 foldAt(vec2 q, int mode) {
+vec2 foldAt(vec2 q, int mode, float turn) {
   if (mode == 1) return vec2(-abs(q.x), q.y);
   if (mode == 2) return vec2(-abs(q.x), -abs(q.y));
   if (mode == 3) {
     float radius = length(q);
     if (radius < 0.0001) return q;
-    float ang = atan(q.y, q.x) - uSpin;
+    float ang = atan(q.y, q.x) - uSpin - turn;
     ang = mod(ang, 6.28318530718);
     if (ang < 0.0) ang += 6.28318530718;
     float wedge = 1.0471975512;
@@ -97,17 +97,19 @@ void main() {
   vec2 p = gl_FragCoord.xy;
   p.y = uResolution.y - p.y;
   vec2 q = p - uOrigin;
-  vec2 qa = mix(q, foldAt(q, uFrom), uSym);
-  vec2 qb = mix(q, foldAt(q, uMode), uSym);
   float fields[8];
   for (int group = 0; group < 8; group++) fields[group] = 0.0;
   for (int i = 0; i < 32; i++) {
     if (i >= uCount) break;
     float radius = uBlobs[i].z;
     if (radius < 0.5) continue;
-    float add = mix(contrib(qa + uOrigin - uBlobs[i].xy, radius), contrib(qb + uOrigin - uBlobs[i].xy, radius), uBlend);
     int group = int(uBlobs[i].w + 0.5);
-    if (group >= 0 && group < 8) fields[group] += add;
+    if (group < 0 || group >= 8) continue;
+    float turn = float(group) * 0.5235987756;
+    vec2 qa = mix(q, foldAt(q, uFrom, turn), uSym);
+    vec2 qb = mix(q, foldAt(q, uMode, turn), uSym);
+    float add = mix(contrib(qa + uOrigin - uBlobs[i].xy, radius), contrib(qb + uOrigin - uBlobs[i].xy, radius), uBlend);
+    fields[group] += add;
   }
   vec3 color = uPaper;
   for (int group = 0; group < 8; group++) {
@@ -348,7 +350,13 @@ function gridHome(blob, aspect) {
   }
 }
 
-function projectHome(blob, mode, aspect = 1) {
+function layerReach(group, groups) {
+  const count = Math.max(1, groups)
+  if (count <= 1) return 1
+  return 1 - (Math.min(group, count - 1) / (count - 1)) * 0.55
+}
+
+function projectHome(blob, mode, aspect = 1, groups = 1, expand = 1) {
   const x = blob.ox
   const y = blob.oy
   if (mode === 'mirror') {
@@ -361,20 +369,23 @@ function projectHome(blob, mode, aspect = 1) {
     return { x: -clamp(along, 0.02, 0.26), y: -clamp(across, 0.02, 0.26) }
   }
   if (mode === 'radial') {
-    const radius = clamp(0.14 + blob.slot * 0.03 + (blob.group % 2) * 0.012, 0.12, 0.33)
-    const spine = WEDGE - 0.04
-    const spread = (blob.slot % 3) * 0.012 + (blob.group % 3) * 0.008
-    const angle = clamp(spine - spread, 0.34, WEDGE - 0.02)
+    const reach = layerReach(blob.group, groups) * expand
+    const radius = (0.055 + blob.slot * 0.026) * reach
+    const spine = WEDGE * 0.7
+    const spread = (blob.slot % 3) * 0.014
+    const angle = clamp(spine - spread, 0.2, WEDGE - 0.025)
     return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
   }
   if (mode === 'grid') return gridHome(blob, aspect)
   return { x: clamp(x, -0.2, 0.2), y: clamp(y, -0.2, 0.2) }
 }
 
-function blendedHome(blob, state) {
+function blendedHome(blob, state, groups = 1, expand = 1) {
   const aspect = state.aspect || 1
-  const from = projectHome(blob, state.modeFrom || 'free', aspect)
-  const to = projectHome(blob, state.mode || 'free', aspect)
+  const fromExpand = state.modeFrom === 'radial' ? expand : 1
+  const toExpand = state.mode === 'radial' ? expand : 1
+  const from = projectHome(blob, state.modeFrom || 'free', aspect, groups, fromExpand)
+  const to = projectHome(blob, state.mode || 'free', aspect, groups, toExpand)
   const t = state.fold ?? 1
   return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }
 }
@@ -554,9 +565,13 @@ function step(state, time, dt, spec) {
 
   const groups = Math.max(1, params.colors.length)
   const share = shownShare(params.count, groups)
+  const radialNow = state.mode === 'radial' || state.modeFrom === 'radial'
+  const expand = 1 + (radialNow ? state.burst * 0.28 : 0)
   const shown = []
   for (const blob of state.blobs) {
-    const home = blendedHome(blob, state)
+    blob.layer = layerReach(blob.group, groups)
+    blob.expand = expand
+    const home = blendedHome(blob, state, groups, expand)
     blob.homeX = home.x
     blob.homeY = home.y
     if (blob.group < groups && blob.slot < share) shown.push(blob)
@@ -726,14 +741,15 @@ function soften(blob, mode, dt, aspect = 1) {
     if (blob.y < -0.26) blob.vy += (-0.26 - blob.y) * gain * dt
   }
   if (mode === 'radial') {
+    const scale = (blob.layer || 1) * (blob.expand || 1)
     const radius = Math.hypot(blob.x, blob.y) + 0.0001
     let angle = Math.atan2(blob.y, blob.x)
-    const innerA = 0.32
+    const innerA = 0.18
     let targetA = angle
     if (angle < innerA) targetA = innerA
     else if (angle > WEDGE - 0.02) targetA = WEDGE - 0.02
-    const targetR = clamp(radius, 0.06, 0.3)
-    if (targetA !== angle || targetR !== radius) {
+    const targetR = clamp(radius, 0.02 * scale, 0.34 * scale)
+    if (targetA !== angle || Math.abs(targetR - radius) > 0.0001) {
       blob.vx += (Math.cos(targetA) * targetR - blob.x) * gain * dt
       blob.vy += (Math.sin(targetA) * targetR - blob.y) * gain * dt
     }
@@ -763,11 +779,12 @@ function contain(blob, mode, aspect = 1) {
     return
   }
   if (mode === 'radial') {
+    const scale = (blob.layer || 1) * (blob.expand || 1)
     let radius = Math.hypot(blob.x, blob.y)
     let angle = Math.atan2(blob.y, blob.x)
-    if (angle < 0.3) angle = 0.3
-    else if (angle > WEDGE - 0.015) angle = WEDGE - 0.015
-    radius = clamp(radius, 0.08, 0.34)
+    if (angle < 0.16) angle = 0.16
+    else if (angle > WEDGE - 0.02) angle = WEDGE - 0.02
+    radius = clamp(radius, 0.02 * scale, 0.34 * scale)
     blob.x = Math.cos(angle) * radius
     blob.y = Math.sin(angle) * radius
     return
@@ -843,7 +860,7 @@ function blobPixels(spec, state, width, height, bufferWidth, bufferHeight) {
   for (const blob of state.blobs) {
     if (blob.group >= groups || blob.slot >= share || count >= MAX_BLOBS) continue
     const fade = blob.slot + 1 <= share ? 1 : Math.max(0, share - blob.slot)
-    const petal = state.mode === 'radial' ? 0.82 : state.mode === 'grid' ? (blob.droplet ? 0.95 : 1.18) : 1
+    const petal = state.mode === 'radial' ? 0.92 * layerReach(blob.group, groups) : state.mode === 'grid' ? (blob.droplet ? 0.95 : 1.18) : 1
     const radius = blob.r * unit * params.scale * fade * petal
     if (radius < 0.5) continue
     let x = originX + blob.x * unit

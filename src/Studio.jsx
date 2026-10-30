@@ -93,6 +93,8 @@ export function Studio() {
   const [tuneOpen, setTuneOpen] = useState(false)
   const [toast, setToast] = useState('')
   const [arrangementAck, setArrangementAck] = useState(null)
+  const [compositionAck, setCompositionAck] = useState(null)
+  const [backgroundAck, setBackgroundAck] = useState(null)
   const toastTimer = useRef(null)
   const slotRef = useRef(null)
   const sideRef = useRef(null)
@@ -494,6 +496,7 @@ export function Studio() {
 
   function onComposition(event) {
     setArrangementAck(null)
+    setCompositionAck(null)
     writeSection({ composition: event.target.value })
   }
 
@@ -517,16 +520,19 @@ export function Studio() {
       return changed ? { ...current, edits } : current
     })
     const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', grid: 'Grid' }[mode]
+    setCompositionAck(mode)
     showToast(`${name} applied to all sections.`)
   }
 
   function onSectionBackground(value) {
+    setBackgroundAck(null)
     writeSection({ background: value })
   }
 
   function onBackgroundPicked(event) {
     const hex = event.target.value
     if (!isHex(hex)) return
+    setBackgroundAck(null)
     editStudio((current) => {
       const known = backgroundChoicesOf(current).some((item) => item.hex.toLowerCase() === hex.toLowerCase())
       const backgrounds = known || backgroundChoicesOf(current).length >= MAX_BACKGROUNDS ? current.backgrounds || [] : [...(current.backgrounds || []), hex]
@@ -551,6 +557,7 @@ export function Studio() {
       }
       return changed ? { ...current, edits } : current
     })
+    setBackgroundAck(hex.toLowerCase())
     showToast('Background applied to all sections.')
   }
 
@@ -679,10 +686,10 @@ export function Studio() {
       isHex(sectionEdit.background) ||
       (sectionEdit.composition && sectionEdit.composition !== 'auto'),
   )
-  const compositionApplied = Boolean(
+  const compositionUniform = Boolean(
     track?.sections?.length && track.sections.every((item) => modeOf(studio.edits?.[sectionKey(item)]) === composition),
   )
-  const backgroundApplied = Boolean(
+  const backgroundUniform = Boolean(
     track?.sections?.length &&
       track.sections.every((item) => {
         const saved = studio.edits?.[sectionKey(item)]?.background
@@ -690,6 +697,10 @@ export function Studio() {
         return hex.toLowerCase() === sectionBackground.toLowerCase()
       }),
   )
+  if (compositionAck != null && !compositionUniform) setCompositionAck(null)
+  if (backgroundAck != null && !backgroundUniform) setBackgroundAck(null)
+  const compositionApplied = compositionAck === composition && compositionUniform
+  const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
   const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
   const backgroundChoices = backgroundChoicesOf(studio)
 
@@ -851,7 +862,7 @@ export function Studio() {
               disabled={!section || !track?.sections?.length}
               onClick={applyComposition}
             >
-              {compositionApplied ? 'Applied to all sections' : 'Apply to all sections'}
+              {compositionApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
             <p className="side-label">Background</p>
             <div className="swatches background-swatches" role="listbox" aria-label="Background">
@@ -895,7 +906,7 @@ export function Studio() {
               disabled={!section || !track?.sections?.length}
               onClick={applyBackground}
             >
-              {backgroundApplied ? 'Applied to all sections' : 'Apply to all sections'}
+              {backgroundApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
           </>
         ) : null}
