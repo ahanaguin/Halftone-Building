@@ -13,6 +13,7 @@ function initialStudio() {
       seeds: {},
       palette: paletteFromCalibration(saved),
       calibration: saved,
+      shine: true,
     }
   }
   return {
@@ -21,6 +22,7 @@ function initialStudio() {
     seeds: {},
     palette: paletteFromPreset(paletteForSection('Quiet')),
     calibration: null,
+    shine: true,
   }
 }
 

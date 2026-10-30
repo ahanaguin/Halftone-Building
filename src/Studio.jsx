@@ -10,7 +10,7 @@ import {
   swatchHex,
 } from './palette.js'
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
-import { SHAPE_RANGE, explainPoster, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { PAPER, SHAPE_RANGE, explainPoster, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
 import { useTrack } from './track.jsx'
@@ -95,6 +95,9 @@ export function Studio() {
     profile: profileRef.current,
     sectionLabel: '',
     tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
+    background: studio.background || PAPER,
+    shine: studio.shine !== false,
+    speed: studio.speed ?? 50,
   })
 
   studioRef.current = studio
@@ -117,6 +120,9 @@ export function Studio() {
     profile: profileRef.current,
     sectionLabel: section?.label || '',
     tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
+    background: studio.background || PAPER,
+    shine: studio.shine !== false,
+    speed: studio.speed ?? 50,
   }
 
   useEffect(() => {
@@ -166,7 +172,7 @@ export function Studio() {
     if (!slot || !side) return undefined
     const measure = () => {
       const boxWidth = slot.clientWidth
-      const boxHeight = side.offsetHeight
+      const boxHeight = slot.clientHeight
       if (boxWidth < 40 || boxHeight < 40) return
       const next = fitCanvas(format, boxWidth, boxHeight)
       sizeRef.current = next
@@ -215,6 +221,9 @@ export function Studio() {
         live.profile = profile
         live.sectionLabel = next?.label || ''
         live.tune = { ...TUNE_DEFAULTS, ...(studioNow.tune || {}) }
+        live.background = studioNow.background || PAPER
+        live.shine = studioNow.shine !== false
+        live.speed = studioNow.speed ?? 50
         const shown = pickRecipe(live.seed, live.sectionLabel || 'Quiet', live.roundness ?? 0.7)
         if (shown !== posterRef.current) {
           posterRef.current = shown
@@ -447,6 +456,24 @@ export function Studio() {
     writeSection({ composition: event.target.value })
   }
 
+  function onBackground(event) {
+    const value = event.target.value
+    const apply = (current) => (current.background === value ? current : { ...current, background: value })
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
+  function onShine() {
+    editStudio((current) => ({ ...current, shine: current.shine === false }))
+  }
+
+  function onSpeed(event) {
+    const value = Number(event.target.value)
+    const apply = (current) => (current.speed === value ? current : { ...current, speed: value })
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
   function onPerColor(event) {
     const per = Number(event.target.value)
     const groups = Math.max(1, enabledColors.length)
@@ -545,7 +572,10 @@ export function Studio() {
   const perMax = Math.min(8, Math.max(4, Math.floor(32 / colorGroups)))
   const perColor = Math.min(perMax, Math.max(4, Math.round(countValue / colorGroups)))
   const tune = { ...TUNE_DEFAULTS, ...(studio.tune || {}) }
-  const composition = ['free', 'mirror', 'quad', 'radial'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
+  const background = studio.background || PAPER
+  const shineOn = studio.shine !== false
+  const motion = studio.speed ?? 50
+  const composition = ['free', 'mirror', 'quad', 'radial', 'grid'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
   const sectionEdited = Boolean(
     sectionEdit.size != null ||
       sectionEdit.count != null ||
@@ -573,11 +603,11 @@ export function Studio() {
         </div>
 
         <div className="canvas-slot" ref={slotRef}>
-          <div className="canvas-frame" style={{ height: size.frame }}>
+          <div className="canvas-frame">
             <div
               ref={holderRef}
               className={track && shapesOn ? 'canvas-stage can-place' : 'canvas-stage'}
-              style={{ width: size.w, height: size.h, background: shapesOn ? '#111111' : artwork }}
+              style={{ width: size.w, height: size.h, background: shapesOn ? background : artwork }}
               onPointerDown={track && shapesOn ? onPlaceDown : undefined}
               onPointerMove={onPlaceMove}
               onPointerUp={onPlaceUp}
@@ -587,11 +617,15 @@ export function Studio() {
             />
             {track && shapesOn ? null : (
               <div className="canvas-empty">
-                {track ? <p>Coming soon</p> : <p>Upload a track to see liquid.</p>}
-                {track ? null : (
-                  <Link className="text-link" to="/upload">
-                    Go to upload
-                  </Link>
+                {track ? (
+                  <p>Coming soon</p>
+                ) : (
+                  <>
+                    <Link className="canvas-upload" to="/upload">
+                      Go to Upload
+                    </Link>
+                    <p>Upload a track to see liquid.</p>
+                  </>
                 )}
               </div>
             )}
@@ -633,9 +667,9 @@ export function Studio() {
                 }}
                 onKeyDown={onScrubKey}
               >
-                <div className="wave studio-wave">
+                <div className={playing ? 'wave studio-wave playing' : 'wave studio-wave'}>
                   {track.bars.map((level, index) => (
-                    <span key={index} style={{ height: `${Math.max(8, level * 100)}%` }} />
+                    <span key={index} style={{ height: `${Math.max(8, level * 100)}%`, '--i': index }} />
                   ))}
                 </div>
                 <div className="playhead" ref={playheadRef} />
@@ -700,6 +734,7 @@ export function Studio() {
                 <option value="mirror">Mirror</option>
                 <option value="quad">Quad</option>
                 <option value="radial">Radial</option>
+                <option value="grid">Grid</option>
               </select>
             </label>
           </>
@@ -786,6 +821,51 @@ export function Studio() {
           aria-label="Round to spiky"
         />
 
+        <div className="slider-labels">
+          <span>Slow</span>
+          <span>Fast</span>
+        </div>
+        <input
+          className="range"
+          type="range"
+          min="0"
+          max="100"
+          value={motion}
+          onPointerDown={startSlide}
+          onPointerUp={finishSlide}
+          onPointerCancel={finishSlide}
+          onChange={onSpeed}
+          aria-label="Animation speed"
+        />
+
+        <div className="background-row">
+          <p className="side-label">Background</p>
+          <label className="swatch" style={{ background }}>
+            <input
+              type="color"
+              value={background}
+              aria-label="Background color"
+              onFocus={startSlide}
+              onBlur={finishSlide}
+              onChange={onBackground}
+            />
+          </label>
+        </div>
+
+        <div className="background-row">
+          <p className="side-label">Drop shine</p>
+          <button
+            type="button"
+            className="shine-switch"
+            role="switch"
+            aria-checked={shineOn}
+            aria-label="Drop shine"
+            onClick={onShine}
+          >
+            <span />
+          </button>
+        </div>
+
         {section && shapesOn ? (
           <div className="section-tools">
             <p className="side-label">This section</p>
@@ -846,10 +926,10 @@ export function Studio() {
         <div className="redo">
           <p>{section ? `${section.label} selected` : 'Section'}</p>
           <button type="button" className="button-redo" disabled={!section || !sectionEdited} onClick={resetSection}>
-            Reset section
+            Clear edits
           </button>
           <button type="button" className="button-redo" disabled={!section} onClick={redoSection}>
-            Redo this section
+            New arrangement
           </button>
         </div>
       </aside>

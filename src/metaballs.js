@@ -1,5 +1,5 @@
 import { hexToRgb, hslToHex, rgbToHsl } from './palette.js'
-import { metricsAt } from './profileTrack.js'
+import { metricsAt, unit } from './profileTrack.js'
 import {
   PAPER,
   SECTION_BLEND,
@@ -21,7 +21,6 @@ const GROUPS = 8
 const PER_GROUP = 8
 const MAX_BLOBS = 32
 const SIZES = [0.056, 0.044, 0.032, 0.022, 0.018, 0.015, 0.013, 0.011]
-const PAPER_RGB = hexToRgb(PAPER).map((channel) => channel / 255)
 
 export const TUNE_DEFAULTS = {
   perColor: 6,
@@ -34,7 +33,7 @@ export const TUNE_DEFAULTS = {
   spin: 1,
 }
 
-const MODE_ID = { free: 0, mirror: 1, quad: 2, radial: 3 }
+const MODE_ID = { free: 0, mirror: 1, quad: 2, radial: 3, grid: 4 }
 const WEDGE = Math.PI / 6
 const FOLD_TIME = 1
 
@@ -61,6 +60,8 @@ uniform int uFrom;
 uniform float uBlend;
 uniform float uSym;
 uniform float uSpin;
+uniform float uShine;
+uniform float uShinePos;
 out vec4 outColor;
 
 float edgeOf(float field) {
@@ -112,6 +113,12 @@ void main() {
     if (group >= uGroups) break;
     color = mix(color, uColors[group], edgeOf(fields[group]) * uOpacity);
   }
+  float radius = length(p - uOrigin) / max(min(uResolution.x, uResolution.y), 1.0);
+  float wave = exp(-pow((radius - uShinePos) * 3.2, 2.0));
+  float core = exp(-radius * radius * 7.0) * (1.0 - smoothstep(0.0, 0.62, uShinePos));
+  float ink = distance(color, uPaper);
+  float flash = max(wave, core) * clamp(uShine, 0.0, 1.0) * smoothstep(0.015, 0.1, ink);
+  color = mix(color, vec3(1.0), clamp(flash, 0.0, 1.0));
   outColor = vec4(color, 1.0);
 }`
 
@@ -121,6 +128,7 @@ let glProgram = null
 let glVao = null
 let glError = ''
 let simCache = null
+const dropCache = new WeakMap()
 
 function compile(context, type, source) {
   const shader = context.createShader(type)
@@ -190,10 +198,14 @@ export function tuneOf(spec) {
 }
 
 function resolveMode(label, composition) {
-  if (composition === 'free' || composition === 'mirror' || composition === 'quad' || composition === 'radial') return composition
+  if (composition === 'free' || composition === 'mirror' || composition === 'quad' || composition === 'radial' || composition === 'grid') return composition
   if (label === 'Build') return 'quad'
   if (label === 'Peak' || label === 'Drop') return 'radial'
   return 'mirror'
+}
+
+function isSymmetric(mode) {
+  return mode === 'mirror' || mode === 'quad' || mode === 'radial'
 }
 
 function sectionsOf(spec) {
@@ -257,7 +269,12 @@ function mixHex(from, to, amount) {
   return [channel(0), channel(1), channel(2)]
 }
 
-function paramsAt(spec, time) {
+export function frameMode(spec) {
+  const params = paramsAt(spec, spec.time || 0)
+  return resolveMode(params.label, params.composition)
+}
+
+export function paramsAt(spec, time) {
   const sections = sectionsOf(spec)
   const section = sectionAt(sections, time) || sections[0]
   const current = sectionParams(spec, section, sections)
@@ -291,7 +308,43 @@ function specKey(spec) {
   return `${spec.tempo || 100}|${sections}|${seeds}|${audio}|${spec.seed || 1}|${compositions}`
 }
 
-function projectHome(blob, mode) {
+function gridLayout(aspect) {
+  const ratio = aspect > 0.2 ? aspect : 1
+  const cols = ratio > 1.35 ? 4 : 3
+  const rows = ratio < 0.8 ? 4 : ratio > 1.35 ? 2 : 3
+  const halfX = ratio >= 1 ? 0.5 * ratio : 0.5
+  const halfY = ratio >= 1 ? 0.5 : 0.5 / ratio
+  return { cols, rows, spanX: halfX * 0.84, spanY: halfY * 0.84, halfX: halfX * 0.94, halfY: halfY * 0.94 }
+}
+
+function gridHome(blob, aspect) {
+  const { cols, rows, spanX, spanY } = gridLayout(aspect)
+  const cells = cols * rows
+  const stride = cells % 2 === 0 ? 5 : 4
+  const index = (blob.group * stride + 1) % cells
+  const col = index % cols
+  const row = Math.floor(index / cols)
+  const wobble = (blob.phase - Math.PI) / Math.PI
+  const x = (cols === 1 ? 0 : -spanX + (col / (cols - 1)) * spanX * 2) + wobble * 0.04
+  const y = (rows === 1 ? 0 : -spanY + (row / (rows - 1)) * spanY * 2) + Math.sin(blob.phase * 1.7) * 0.035
+  if (blob.slot === 0) return { x, y }
+  if (blob.slot === 1) {
+    const horizontal = blob.group % 2 === 0
+    return { x: x + (horizontal ? 0.105 : 0.012), y: y + (horizontal ? 0.01 : 0.12) }
+  }
+  if (blob.slot === 2) {
+    const angle = blob.phase + 1.2
+    return { x: x + Math.cos(angle) * 0.07, y: y + Math.sin(angle) * 0.06 }
+  }
+  const angle = blob.phase + blob.slot
+  const dist = 0.17 + (blob.slot - 3) * 0.04
+  return {
+    x: clamp(x + Math.cos(angle) * dist, -spanX, spanX),
+    y: clamp(y + Math.sin(angle) * dist, -spanY, spanY),
+  }
+}
+
+function projectHome(blob, mode, aspect = 1) {
   const x = blob.ox
   const y = blob.oy
   if (mode === 'mirror') {
@@ -310,12 +363,14 @@ function projectHome(blob, mode) {
     const angle = clamp(spine - spread, 0.34, WEDGE - 0.02)
     return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
   }
+  if (mode === 'grid') return gridHome(blob, aspect)
   return { x: clamp(x, -0.2, 0.2), y: clamp(y, -0.2, 0.2) }
 }
 
 function blendedHome(blob, state) {
-  const from = projectHome(blob, state.modeFrom || 'free')
-  const to = projectHome(blob, state.mode || 'free')
+  const aspect = state.aspect || 1
+  const from = projectHome(blob, state.modeFrom || 'free', aspect)
+  const to = projectHome(blob, state.mode || 'free', aspect)
   const t = state.fold ?? 1
   return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }
 }
@@ -325,6 +380,7 @@ function createState(spec) {
   const first = sections[0]
   const edit = first ? spec.edits?.[sectionKey(first)] : null
   const mode = resolveMode(first?.label, edit?.composition)
+  const aspect = spec.width > 0 && spec.height > 0 ? spec.width / spec.height : 1
   const rand = mulberry32((seedFor(spec, first, sections) || 1) ^ 0x5eed)
   const blobs = []
   for (let group = 0; group < GROUPS; group += 1) {
@@ -348,7 +404,7 @@ function createState(spec) {
         droplet: slot >= 3,
         phase: rand() * Math.PI * 2,
       }
-      const home = projectHome(blob, mode)
+      const home = projectHome(blob, mode, aspect)
       blob.x = home.x
       blob.y = home.y
       blob.homeX = home.x
@@ -367,12 +423,65 @@ function createState(spec) {
     angle: 0,
     mode,
     modeFrom: mode,
+    aspect,
     fold: 1,
     foldElapsed: FOLD_TIME,
     spin: 0,
     burst: 0,
     dropping: false,
+    shine: 0,
+    shinePos: -1,
   }
+}
+
+function motionOf(spec) {
+  const slider = Number.isFinite(spec.speed) ? spec.speed : 50
+  return Math.pow(8, clamp(slider, 0, 100) / 100 - 0.5)
+}
+
+function biggestDropTimes(spec) {
+  const profile = spec.profile
+  const timeline = profile?.timeline
+  if (!timeline?.bass?.length || !timeline?.rms?.length) return []
+  const cached = dropCache.get(profile)
+  if (cached) return cached
+  const hop = timeline.hop || 0.05
+  const beforeN = Math.max(2, Math.round(1.1 / hop))
+  const afterN = Math.max(1, Math.round(0.35 / hop))
+  const bass = timeline.bass
+  const loud = timeline.rms
+  const hits = []
+  for (let index = beforeN; index < bass.length - afterN; index += 1) {
+    let beforeBass = 0
+    let beforeLoud = 0
+    let afterBass = 0
+    let afterLoud = 0
+    for (let sample = index - beforeN; sample < index; sample += 1) {
+      beforeBass += unit(bass[sample], profile.bass)
+      beforeLoud += unit(loud[sample], profile.rms)
+    }
+    for (let sample = index; sample < index + afterN; sample += 1) {
+      afterBass += unit(bass[sample], profile.bass)
+      afterLoud += unit(loud[sample], profile.rms)
+    }
+    beforeBass /= beforeN
+    beforeLoud /= beforeN
+    afterBass /= afterN
+    afterLoud /= afterN
+    const rise = (afterBass - beforeBass) * 0.65 + (afterLoud - beforeLoud) * 0.35
+    if (rise > 0.16 && afterBass > 0.48 && afterLoud > 0.4) hits.push({ time: index * hop, impact: rise })
+  }
+  const clustered = []
+  for (const hit of hits) {
+    const last = clustered[clustered.length - 1]
+    if (last && hit.time - last.time < 4) {
+      if (hit.impact > last.impact) clustered[clustered.length - 1] = hit
+    } else clustered.push(hit)
+  }
+  const max = clustered.reduce((best, hit) => Math.max(best, hit.impact), 0)
+  const times = clustered.filter((hit) => hit.impact >= max * 0.8).map((hit) => hit.time)
+  dropCache.set(profile, times)
+  return times
 }
 
 function shownShare(count, groups) {
@@ -383,6 +492,7 @@ function shownShare(count, groups) {
 function step(state, time, dt, spec) {
   const params = paramsAt(spec, time)
   const tune = tuneOf(spec)
+  state.aspect = spec.width > 0 && spec.height > 0 ? spec.width / spec.height : state.aspect || 1
   const metrics = metricsAt(spec.profile, time)
   const previous = metricsAt(spec.profile, Math.max(0, time - dt))
   const tempo = (spec.tempo || 100) / 110
@@ -416,11 +526,26 @@ function step(state, time, dt, spec) {
   state.foldElapsed = Math.min(FOLD_TIME, state.foldElapsed + dt)
   const foldT = state.foldElapsed / FOLD_TIME
   state.fold = foldT * foldT * (3 - 2 * foldT)
-  state.spin += dt * 0.16 * tempo * tune.spin
+  const motion = motionOf(spec)
+  const mdt = dt * motion
+  state.spin += mdt * 0.16 * tempo * tune.spin
   if (params.label === 'Drop') {
     if (!state.dropping) state.burst = 1
     state.dropping = true
   } else state.dropping = false
+  const earlier = time - dt
+  const dropTimes = biggestDropTimes(spec)
+  for (let index = 0; index < dropTimes.length; index += 1) {
+    const hit = dropTimes[index]
+    if (earlier < hit && time >= hit) {
+      state.shine = 1
+      state.shinePos = 0
+    }
+  }
+  if (state.shine > 0) {
+    state.shinePos += dt * 0.4
+    state.shine = Math.max(0, state.shine - dt * 0.22)
+  }
   state.burst *= Math.exp(-dt / 0.85)
 
   const groups = Math.max(1, params.colors.length)
@@ -441,23 +566,26 @@ function step(state, time, dt, spec) {
 
   const region = state.fold > 0.45 ? state.mode : state.modeFrom
   const attract = (0.08 + state.gather * 0.42 + state.bass * 0.55) * tune.attract
-  const differentRest = region === 'radial' ? 0.07 : region === 'free' ? 0.18 : 0.11
+  const differentRest = region === 'radial' ? 0.07 : region === 'grid' ? 0.2 : region === 'free' ? 0.18 : 0.11
   for (let i = 0; i < shown.length; i += 1) {
     for (let j = i + 1; j < shown.length; j += 1) {
       const dx = shown[j].x - shown[i].x
       const dy = shown[j].y - shown[i].y
       const dist = Math.hypot(dx, dy) + 0.001
       const same = shown[i].group === shown[j].group
-      const rest = same ? (shown[i].r + shown[j].r) * (region === 'radial' ? 1.15 : 1.45) : differentRest
+      const sameRest = region === 'grid'
+        ? (shown[i].droplet || shown[j].droplet ? 2.6 : 0.7)
+        : region === 'radial' ? 1.15 : 1.45
+      const rest = same ? (shown[i].r + shown[j].r) * sameRest : differentRest
       const falloff = Math.exp(-Math.max(0, dist - rest) * 1.15)
-      const pull = (same ? 1.15 : 0.34) * attract * (region === 'radial' ? 0.15 : 1)
+      const pull = (same ? 1.15 : 0.34) * attract * (region === 'radial' ? 0.15 : region === 'grid' ? 0.35 : 1)
       const accel = (dist - rest) * pull * falloff
       const ux = dx / dist
       const uy = dy / dist
-      shown[i].vx += ux * accel * dt
-      shown[i].vy += uy * accel * dt
-      shown[j].vx -= ux * accel * dt
-      shown[j].vy -= uy * accel * dt
+      shown[i].vx += ux * accel * mdt
+      shown[i].vy += uy * accel * mdt
+      shown[j].vx -= ux * accel * mdt
+      shown[j].vy -= uy * accel * mdt
     }
   }
 
@@ -482,30 +610,32 @@ function step(state, time, dt, spec) {
     ty = -depth
   }
 
-  const drift = 0.1 * tempo * tune.drift
+  const drift = 0.1 * tempo * tune.drift * (region === 'grid' ? 0.55 : 1)
   for (const blob of shown) {
-    blob.vx += Math.cos(state.angle + blob.phase + time * 0.22 * tempo) * drift * dt
-    blob.vy += Math.sin(state.angle * 0.85 + blob.phase * 1.35 + time * 0.17 * tempo) * drift * dt
+    blob.vx += Math.cos(state.angle + blob.phase + time * 0.22 * tempo * motion) * drift * mdt
+    blob.vy += Math.sin(state.angle * 0.85 + blob.phase * 1.35 + time * 0.17 * tempo * motion) * drift * mdt
     const burstEase = region === 'radial' ? state.burst : 0
-    const hold = (0.62 - state.gather * 0.4) * (blob.droplet ? 1 - state.split * 0.7 : 1) * (1 - burstEase * 0.85) * (region === 'radial' ? 2.3 : 1)
-    blob.vx += (blob.homeX - blob.x) * hold * dt
-    blob.vy += (blob.homeY - blob.y) * hold * dt
-    if (region !== 'radial') {
-      blob.vx -= (cx - tx) * 1.05 * dt
-      blob.vy -= (cy - ty) * 1.05 * dt
+    const hold = region === 'grid'
+      ? 0.14 + (1 - state.bass) * 0.1
+      : (0.62 - state.gather * 0.4) * (blob.droplet ? 1 - state.split * 0.7 : 1) * (1 - burstEase * 0.85) * (region === 'radial' ? 2.3 : 1)
+    blob.vx += (blob.homeX - blob.x) * hold * mdt
+    blob.vy += (blob.homeY - blob.y) * hold * mdt
+    if (region !== 'radial' && region !== 'grid') {
+      blob.vx -= (cx - tx) * 1.05 * mdt
+      blob.vy -= (cy - ty) * 1.05 * mdt
     }
-    if (region === 'mirror') blob.vx += (0 - blob.x) * state.bass * 1.2 * dt
+    if (region === 'mirror') blob.vx += (0 - blob.x) * state.bass * 1.2 * mdt
     if (region === 'quad') {
-      blob.vx += (0 - blob.x) * state.bass * 0.85 * dt
-      blob.vy += (0 - blob.y) * state.bass * 0.85 * dt
+      blob.vx += (0 - blob.x) * state.bass * 0.85 * mdt
+      blob.vy += (0 - blob.y) * state.bass * 0.85 * mdt
     }
     if (region === 'radial') {
       const radius = Math.hypot(blob.x, blob.y) + 0.001
       const ux = blob.x / radius
       const uy = blob.y / radius
       const inward = state.bass * 0.4 * (1 - state.burst) - state.burst * 0.55
-      blob.vx -= ux * inward * dt
-      blob.vy -= uy * inward * dt
+      blob.vx -= ux * inward * mdt
+      blob.vy -= uy * inward * mdt
     }
     if (blob.droplet) {
       const parent = state.blobs[blob.parent]
@@ -515,45 +645,62 @@ function step(state, time, dt, spec) {
         const dist = Math.hypot(dx, dy) + 0.001
         const outward = state.split * 0.72 * tempo
         const home = state.bass * 0.9 - 0.08
-        blob.vx += (dx / dist) * outward * dt
-        blob.vy += (dy / dist) * outward * dt
-        blob.vx += (parent.x + (dx / dist) * 0.03 - blob.x) * home * dt
-        blob.vy += (parent.y + (dy / dist) * 0.03 - blob.y) * home * dt
+        blob.vx += (dx / dist) * outward * mdt
+        blob.vy += (dy / dist) * outward * mdt
+        blob.vx += (parent.x + (dx / dist) * 0.03 - blob.x) * home * mdt
+        blob.vy += (parent.y + (dy / dist) * 0.03 - blob.y) * home * mdt
       } else if (region === 'mirror') {
-        blob.vx -= state.split * 0.95 * tempo * dt
-        blob.vx += (parent.x - blob.x) * state.bass * 0.7 * dt
+        blob.vx -= state.split * 0.95 * tempo * mdt
+        blob.vx += (parent.x - blob.x) * state.bass * 0.7 * mdt
       } else if (region === 'quad') {
-        blob.vx -= state.split * 0.7 * tempo * dt
-        blob.vy -= state.split * 0.7 * tempo * dt
-        blob.vx += (parent.x - blob.x) * state.bass * 0.55 * dt
-        blob.vy += (parent.y - blob.y) * state.bass * 0.55 * dt
+        blob.vx -= state.split * 0.7 * tempo * mdt
+        blob.vy -= state.split * 0.7 * tempo * mdt
+        blob.vx += (parent.x - blob.x) * state.bass * 0.55 * mdt
+        blob.vy += (parent.y - blob.y) * state.bass * 0.55 * mdt
+      } else if (region === 'grid') {
+        const dx = blob.x - parent.x
+        const dy = blob.y - parent.y
+        const dist = Math.hypot(dx, dy) + 0.001
+        const outward = state.split * 0.16 * tempo
+        blob.vx += (dx / dist) * outward * mdt
+        blob.vy += (dy / dist) * outward * mdt
       } else {
         const radius = Math.hypot(blob.x, blob.y) + 0.001
         const out = state.split * 0.7 * tempo + state.burst * 1.7
-        blob.vx += (blob.x / radius) * out * dt
-        blob.vy += (blob.y / radius) * out * dt
-        blob.vx += (parent.x - blob.x) * state.bass * (1 - state.burst) * 0.6 * dt
-        blob.vy += (parent.y - blob.y) * state.bass * (1 - state.burst) * 0.6 * dt
+        blob.vx += (blob.x / radius) * out * mdt
+        blob.vy += (blob.y / radius) * out * mdt
+        blob.vx += (parent.x - blob.x) * state.bass * (1 - state.burst) * 0.6 * mdt
+        blob.vy += (parent.y - blob.y) * state.bass * (1 - state.burst) * 0.6 * mdt
       }
     }
-    const walled = state.fold > 0.82 ? region : 'travel'
-    soften(blob, walled, dt)
-    blob.vx *= Math.exp(-dt * 0.85)
-    blob.vy *= Math.exp(-dt * 0.85)
+    const walled = state.mode === 'grid' ? 'grid' : state.fold > 0.82 ? region : 'travel'
+    soften(blob, walled, mdt, state.aspect)
+    blob.vx *= Math.exp(-mdt * 0.85)
+    blob.vy *= Math.exp(-mdt * 0.85)
     const speed = Math.hypot(blob.vx, blob.vy)
     const cap = 0.38 * tempo
     if (speed > cap) {
       blob.vx *= cap / speed
       blob.vy *= cap / speed
     }
-    blob.x += blob.vx * dt
-    blob.y += blob.vy * dt
-    contain(blob, state.fold > 0.82 ? region : 'travel')
+    blob.x += blob.vx * mdt
+    blob.y += blob.vy * mdt
+    contain(blob, state.mode === 'grid' ? 'grid' : state.fold > 0.82 ? region : 'travel', state.aspect)
   }
 }
 
-function soften(blob, mode, dt) {
+function soften(blob, mode, dt, aspect = 1) {
   const gain = 8
+  if (mode === 'grid') {
+    const { halfX, halfY } = gridLayout(aspect)
+    const boxX = halfX * 0.86
+    const boxY = halfY * 0.86
+    if (blob.x < -boxX) blob.vx += (-boxX - blob.x) * 4 * dt
+    if (blob.x > boxX) blob.vx -= (blob.x - boxX) * 4 * dt
+    if (blob.y < -boxY) blob.vy += (-boxY - blob.y) * 4 * dt
+    if (blob.y > boxY) blob.vy -= (blob.y - boxY) * 4 * dt
+    return
+  }
   if (mode === 'free') {
     const box = 0.18
     if (blob.x < -box) blob.vx += (-box - blob.x) * 4 * dt
@@ -589,7 +736,13 @@ function soften(blob, mode, dt) {
   }
 }
 
-function contain(blob, mode) {
+function contain(blob, mode, aspect = 1) {
+  if (mode === 'grid') {
+    const { halfX, halfY } = gridLayout(aspect)
+    blob.x = clamp(blob.x, -halfX, halfX)
+    blob.y = clamp(blob.y, -halfY, halfY)
+    return
+  }
   if (mode === 'travel') {
     blob.x = clamp(blob.x, -0.34, 0.34)
     blob.y = clamp(blob.y, -0.34, 0.34)
@@ -643,6 +796,16 @@ function liftColor(red, green, blue) {
   return [r / 255, g / 255, b / 255]
 }
 
+function paperChannels(spec) {
+  const hex = typeof spec.background === 'string' && /^#[0-9a-fA-F]{6}$/.test(spec.background) ? spec.background : PAPER
+  const [red, green, blue] = hexToRgb(hex)
+  return [red / 255, green / 255, blue / 255]
+}
+
+function paperHex(spec) {
+  return typeof spec.background === 'string' && /^#[0-9a-fA-F]{6}$/.test(spec.background) ? spec.background : PAPER
+}
+
 function rgbOf(color) {
   if (typeof color === 'string' && color.startsWith('rgb')) {
     const parts = color.match(/\d+/g) || [0, 0, 0]
@@ -668,11 +831,11 @@ function blobPixels(spec, state, width, height, bufferWidth, bufferHeight) {
   const spread = Math.sqrt(tune.falloff / Math.max(0.25, threshold))
   const originX = width / 2 + clamp(params.offsetX, -0.2, 0.2) * width
   const originY = height / 2 + clamp(params.offsetY, -0.2, 0.2) * height
-  const symmetric = (state.mode && state.mode !== 'free') || (state.modeFrom && state.modeFrom !== 'free' && state.fold < 1)
+  const symmetric = isSymmetric(state.mode) || (isSymmetric(state.modeFrom) && state.fold < 1)
   for (const blob of state.blobs) {
     if (blob.group >= groups || blob.slot >= share || count >= MAX_BLOBS) continue
     const fade = blob.slot + 1 <= share ? 1 : Math.max(0, share - blob.slot)
-    const petal = state.mode === 'radial' ? 0.82 : 1
+    const petal = state.mode === 'radial' ? 0.82 : state.mode === 'grid' ? (blob.droplet ? 0.95 : 1.18) : 1
     const radius = blob.r * unit * params.scale * fade * petal
     if (radius < 0.5) continue
     let x = originX + blob.x * unit
@@ -699,7 +862,7 @@ function blobPixels(spec, state, width, height, bufferWidth, bufferHeight) {
     data,
     colors,
     threshold,
-    falloff: tune.falloff,
+    falloff: tune.falloff * (state.mode === 'grid' ? 1.2 : 1),
     opacity: tune.opacity,
     count,
     groups,
@@ -747,13 +910,17 @@ function renderGL(ctx, spec, state, width, height) {
   gl.uniform1i(gl.getUniformLocation(glProgram, 'uGroups'), field.groups)
   gl.uniform4fv(gl.getUniformLocation(glProgram, 'uBlobs'), field.data)
   gl.uniform3fv(gl.getUniformLocation(glProgram, 'uColors'), field.colors)
-  gl.uniform3f(gl.getUniformLocation(glProgram, 'uPaper'), PAPER_RGB[0], PAPER_RGB[1], PAPER_RGB[2])
+  const paper = paperChannels(spec)
+  gl.uniform3f(gl.getUniformLocation(glProgram, 'uPaper'), paper[0], paper[1], paper[2])
   gl.uniform2f(gl.getUniformLocation(glProgram, 'uOrigin'), field.originX, field.originY)
   gl.uniform1i(gl.getUniformLocation(glProgram, 'uMode'), field.mode)
   gl.uniform1i(gl.getUniformLocation(glProgram, 'uFrom'), field.from)
   gl.uniform1f(gl.getUniformLocation(glProgram, 'uBlend'), field.blend)
   gl.uniform1f(gl.getUniformLocation(glProgram, 'uSym'), field.sym)
   gl.uniform1f(gl.getUniformLocation(glProgram, 'uSpin'), field.spin)
+  const shineOn = spec.shine !== false
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'uShine'), shineOn ? state.shine || 0 : 0)
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'uShinePos'), shineOn ? state.shinePos ?? -1 : -1)
   gl.drawArrays(gl.TRIANGLES, 0, 3)
   return glCanvas
 }
@@ -769,7 +936,7 @@ export function paintMetaballs(ctx, spec) {
   ctx.clip()
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
-  ctx.fillStyle = PAPER
+  ctx.fillStyle = paperHex(spec)
   ctx.fillRect(0, 0, width, height)
   const field = renderGL(ctx, spec, state, width, height)
   if (field) {

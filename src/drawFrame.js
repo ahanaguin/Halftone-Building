@@ -1,7 +1,8 @@
 import { paletteColors, swatchHex } from './palette.js'
-import { paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
+import { frameMode, paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
+import { paintGrid } from './gridField.js'
 import { metricsAt } from './profileTrack.js'
-import { sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { PAPER, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 
 let grainCanvas = null
 
@@ -49,7 +50,8 @@ export function paintFrame(ctx, spec) {
   ctx.save()
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
-  paintMetaballs(ctx, spec)
+  if (frameMode(spec) === 'grid') paintGrid(ctx, spec)
+  else paintMetaballs(ctx, spec)
   paintGrain(ctx, width, height)
   ctx.restore()
 }
@@ -75,6 +77,9 @@ export function frameInput({ track, studio, profile, time, width, height }) {
     colors,
     palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
     tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
+    background: studio.background || PAPER,
+    shine: studio.shine !== false,
+    speed: studio.speed ?? 50,
     sectionLabel: section?.label || '',
     loud: metrics.loud,
     bass: metrics.bass,

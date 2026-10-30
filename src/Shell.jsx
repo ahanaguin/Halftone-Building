@@ -59,7 +59,7 @@ function NavItems({ items }) {
 export function Shell() {
   const [open, setOpen] = useState(false)
   const location = useLocation()
-  const { track, canUndo, undoStudio, calibrateChrome, skipCalibration } = useTrack()
+  const { track, calibrateChrome, skipCalibration } = useTrack()
   const studio = location.pathname === '/studio'
   const exportPage = location.pathname === '/export'
   const menuRef = useRef(null)
@@ -148,9 +148,6 @@ export function Shell() {
               <Link to="/pick-a-style" className="text-link back-styles">
                 {'< Back to styles'}
               </Link>
-              <button type="button" className="button-outline header-button" onClick={undoStudio} disabled={!canUndo}>
-                Undo
-              </button>
               <Link to="/export" className="button header-button">
                 Export
               </Link>
