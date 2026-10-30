@@ -748,6 +748,11 @@ h1 {
   margin-top: 8px;
 }
 
+.apply-all {
+  width: 100%;
+  margin-top: 8px;
+}
+
 .style-select {
   width: 100%;
   padding: 12px 36px 12px 14px;

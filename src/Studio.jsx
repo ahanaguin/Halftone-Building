@@ -456,6 +456,24 @@ export function Studio() {
     writeSection({ composition: event.target.value })
   }
 
+  function applyComposition() {
+    if (!track?.sections?.length) return
+    const saved = studio.edits?.[activeKey]?.composition
+    const mode = ['free', 'mirror', 'quad', 'radial', 'grid'].includes(saved) ? saved : 'auto'
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of track.sections) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        if ((previous.composition || 'auto') === mode) continue
+        edits[key] = { ...previous, composition: mode }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+  }
+
   function onBackground(event) {
     const value = event.target.value
     const apply = (current) => (current.background === value ? current : { ...current, background: value })
@@ -737,6 +755,9 @@ export function Studio() {
                 <option value="grid">Grid</option>
               </select>
             </label>
+            <button type="button" className="button-redo apply-all" disabled={!section || !track?.sections?.length} onClick={applyComposition}>
+              Apply to all sections
+            </button>
           </>
         ) : null}
 
