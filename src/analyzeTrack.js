@@ -290,51 +290,73 @@ function sliceStats(level, start, end, duration) {
   return { mean: average(slice), rise: average(tail.length ? tail : slice) - average(head) }
 }
 
-function labelsFor(ranges, level, duration, energy) {
+function numberLabels(labels) {
+  const totals = {}
+  labels.forEach((label) => {
+    totals[label] = (totals[label] || 0) + 1
+  })
+  const seen = {}
+  return labels.map((label) => {
+    if ((totals[label] || 0) < 2) return label
+    seen[label] = (seen[label] || 0) + 1
+    return `${label} ${seen[label]}`
+  })
+}
+
+export function labelsFor(ranges, level, duration, energy) {
   const stats = ranges.map((range) => sliceStats(level, range.start, range.end, duration))
+  if (!stats.length) return []
+  const meanAll = average(stats.map((item) => item.mean))
+  const last = stats.length - 1
   const labels = stats.map((item, index) => {
     const previous = stats[index - 1]
-    if (previous && previous.mean - item.mean >= 0.2 && item.mean < 0.72) return 'Drop'
-    if (item.rise >= 0.16 && item.mean < 0.8) return 'Build'
-    if (item.mean >= 0.64) return 'Peak'
-    if (item.mean <= 0.36) return 'Quiet'
-    if (item.rise >= 0.1) return 'Build'
-    if (item.rise <= -0.14) return 'Drop'
-    return item.mean >= 0.5 ? 'Peak' : 'Quiet'
+    const dip = previous && previous.mean - item.mean >= 0.16 && item.mean <= meanAll + 0.02
+    if (index > 0 && index < last && dip) return 'Break'
+    if (item.rise >= 0.12 && item.mean < 0.86) return 'Build'
+    if (item.mean <= 0.38 || item.mean <= meanAll - 0.14) return 'Quiet'
+    if (item.mean >= Math.max(0.5, meanAll - 0.04)) return 'Main'
+    if (item.rise <= -0.1) return 'Quiet'
+    return item.mean >= meanAll ? 'Main' : 'Quiet'
   })
 
-  const last = labels.length - 1
-  if (
-    last > 0 &&
-    labels[last] !== 'Peak' &&
-    stats[last].mean < 0.72 &&
-    (stats[last].mean < stats[last - 1].mean || stats[last].rise < -0.05)
-  ) {
-    labels[last] = 'Outro'
-  }
-
-  const loudest = stats.reduce((best, item, index) => (item.mean > stats[best].mean ? index : best), 0)
-  const quietest = stats.reduce((best, item, index) => (item.mean < stats[best].mean ? index : best), 0)
-  const driving = energy === 'Driving' || energy === 'Intense'
-  const calm = energy === 'Calm' || energy === 'Mellow'
-
-  if (labels.length === 1) {
-    if (driving || energy === 'Steady') labels[0] = 'Peak'
-    else if (calm) labels[0] = 'Quiet'
+  if (stats.length === 1) {
+    const calm = energy === 'Calm' || energy === 'Mellow'
+    if (calm || stats[0].mean < 0.42) labels[0] = 'Quiet'
+    else if (stats[0].mean >= 0.6) labels[0] = 'High'
+    else labels[0] = 'Main'
     return labels
   }
 
-  if ((driving || energy === 'Steady') && labels.every((label) => label === 'Quiet' || label === 'Outro')) {
-    labels[loudest] = 'Peak'
+  if (stats[0].mean < meanAll - 0.02) labels[0] = 'Intro'
+  const ending = stats[last]
+  const fades = ending.rise < -0.05 || ending.mean < stats[last - 1].mean - 0.08 || ending.mean < meanAll - 0.06
+  if (fades && ending.mean < 0.78) labels[last] = 'Outro'
+
+  for (let index = 1; index < labels.length; index += 1) {
+    if (labels[index] === 'Outro' || labels[index] === 'Break') continue
+    if (labels[index - 1] !== 'Build') continue
+    const jump = stats[index].mean - stats[index - 1].mean
+    if (jump >= 0.14 && stats[index].mean >= 0.52) labels[index] = 'Drop'
   }
-  if (driving && !labels.includes('Peak')) labels[loudest] = 'Peak'
-  if (driving && quietest !== loudest && !labels.includes('Quiet') && !labels.includes('Outro')) {
-    labels[quietest] = quietest === last ? 'Outro' : 'Quiet'
+
+  const ranked = stats
+    .map((item, index) => ({ index, mean: item.mean }))
+    .filter((item) => !['Intro', 'Outro', 'Break', 'Quiet', 'Drop'].includes(labels[item.index]))
+    .sort((left, right) => right.mean - left.mean)
+  if (ranked[0] && ranked[0].mean >= 0.58) {
+    labels[ranked[0].index] = 'High'
+    const second = ranked[1]
+    if (second && second.mean >= 0.68 && ranked[0].mean - second.mean <= 0.07) labels[second.index] = 'High'
   }
-  if (calm && labels.every((label) => label === 'Peak')) {
-    labels[quietest] = quietest === last ? 'Outro' : 'Quiet'
+
+  const driving = energy === 'Driving' || energy === 'Intense'
+  const settled = labels.every((label) => label === 'Quiet' || label === 'Intro' || label === 'Outro' || label === 'Break')
+  if (driving && settled) {
+    const loudest = stats.reduce((best, item, index) => (item.mean > stats[best].mean ? index : best), 0)
+    if (labels[loudest] !== 'Outro' && labels[loudest] !== 'Intro') labels[loudest] = stats[loudest].mean >= 0.58 ? 'High' : 'Main'
   }
-  return labels
+
+  return numberLabels(labels)
 }
 
 export function correctTempo(rawBpm, reading) {

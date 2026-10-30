@@ -10,12 +10,38 @@ import {
   swatchHex,
 } from './palette.js'
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
-import { PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { GRID_COUNT, INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
 import { useTrack } from './track.jsx'
 
 const FORMATS = ['9:16', '1:1', '16:9']
+const MAX_BACKGROUNDS = 8
+
+function backgroundChoicesOf(studio) {
+  const extras = []
+  for (const hex of studio.backgrounds || []) {
+    if (!isHex(hex)) continue
+    if (extras.some((item) => item.toLowerCase() === hex.toLowerCase())) continue
+    extras.push(hex)
+  }
+  const palette = (studio.palette?.swatches || []).map((swatch) => swatchHex(swatch))
+  const room = Math.max(0, MAX_BACKGROUNDS - 2 - extras.length)
+  const choices = [
+    { hex: PAPER, label: 'Off-white' },
+    { hex: INK_BLACK, label: 'Near-black' },
+  ]
+  palette.slice(0, room).forEach((hex, index) => {
+    if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
+    choices.push({ hex, label: `Color ${index + 1}` })
+  })
+  extras.forEach((hex) => {
+    if (choices.length >= MAX_BACKGROUNDS) return
+    if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
+    choices.push({ hex, label: 'Custom color' })
+  })
+  return choices
+}
 const STYLES = [
   { id: 'shapes', label: 'Liquid', ready: true },
   { id: 'halftone', label: 'Halftone', ready: false },
@@ -79,6 +105,7 @@ export function Studio() {
   const studioRef = useRef(studio)
   const slideOrigin = useRef(null)
   const placeDrag = useRef(null)
+  const backgroundPicker = useRef(null)
   const playToggle = useRef(null)
   const sizeRef = useRef(size)
   const liveRef = useRef({
@@ -497,6 +524,18 @@ export function Studio() {
     writeSection({ background: value })
   }
 
+  function onBackgroundPicked(event) {
+    const hex = event.target.value
+    if (!isHex(hex)) return
+    editStudio((current) => {
+      const known = backgroundChoicesOf(current).some((item) => item.hex.toLowerCase() === hex.toLowerCase())
+      const backgrounds = known || backgroundChoicesOf(current).length >= MAX_BACKGROUNDS ? current.backgrounds || [] : [...(current.backgrounds || []), hex]
+      const edits = { ...(current.edits || {}) }
+      if (activeKey) edits[activeKey] = { ...(edits[activeKey] || {}), background: hex }
+      return { ...current, backgrounds, edits }
+    })
+  }
+
   function applyBackground() {
     if (!track?.sections?.length) return
     const hex = isHex(studio.edits?.[activeKey]?.background) ? studio.edits[activeKey].background : studio.background || PAPER
@@ -615,7 +654,8 @@ export function Studio() {
   const spiky = Math.round((1 - studio.roundness) * 100)
   const shapesOn = studio.style === 'shapes'
   const sectionEdit = studio.edits?.[activeKey] || {}
-  const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
+  const composition = ['free', 'mirror', 'quad', 'radial', 'grid'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
+  const shapeRange = composition === 'grid' ? GRID_COUNT : SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
   const sizeValue = sectionEdit.size ?? 50
   const countValue = Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
   const enabledColors =
@@ -630,7 +670,6 @@ export function Studio() {
   const sectionBackground = isHex(sectionEdit.background) ? sectionEdit.background : studio.background || PAPER
   const shineOn = studio.shine !== false
   const motion = studio.speed ?? 50
-  const composition = ['free', 'mirror', 'quad', 'radial', 'grid'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
   const sectionEdited = Boolean(
     sectionEdit.size != null ||
       sectionEdit.count != null ||
@@ -652,11 +691,7 @@ export function Studio() {
       }),
   )
   const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
-  const backgroundChoices = [
-    { hex: PAPER, label: 'Off-white' },
-    { hex: '#111111', label: 'Near-black' },
-    ...studio.palette.swatches.map((swatch, index) => ({ hex: swatchHex(swatch), label: `Color ${index + 1}` })),
-  ]
+  const backgroundChoices = backgroundChoicesOf(studio)
 
   return (
     <main className="studio">
@@ -819,14 +854,14 @@ export function Studio() {
               {compositionApplied ? 'Applied to all sections' : 'Apply to all sections'}
             </button>
             <p className="side-label">Background</p>
-            <div className="bg-choices" role="listbox" aria-label="Background">
+            <div className="swatches background-swatches" role="listbox" aria-label="Background">
               {backgroundChoices.map((choice) => {
                 const selected = choice.hex.toLowerCase() === sectionBackground.toLowerCase()
                 return (
                   <button
-                    key={choice.label}
+                    key={`${choice.label}-${choice.hex}`}
                     type="button"
-                    className={selected ? 'bg-choice is-on' : 'bg-choice'}
+                    className={selected ? 'swatch is-on' : 'swatch'}
                     style={{ background: choice.hex }}
                     aria-label={choice.label}
                     aria-selected={selected}
@@ -835,15 +870,24 @@ export function Studio() {
                   />
                 )
               })}
-              <label className={backgroundChoices.some((choice) => choice.hex.toLowerCase() === sectionBackground.toLowerCase()) ? 'bg-choice bg-custom' : 'bg-choice bg-custom is-on'} style={{ background: sectionBackground }}>
-                <input
-                  type="color"
-                  value={sectionBackground}
-                  aria-label="Custom background color"
-                  disabled={!section}
-                  onChange={(event) => onSectionBackground(event.target.value)}
-                />
-              </label>
+              <button
+                type="button"
+                className="add-swatch"
+                aria-label="Add a background color"
+                disabled={!section || backgroundChoices.length >= MAX_BACKGROUNDS}
+                onClick={() => backgroundPicker.current?.click()}
+              >
+                +
+              </button>
+              <input
+                ref={backgroundPicker}
+                className="color-pop"
+                type="color"
+                value={sectionBackground}
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={onBackgroundPicked}
+              />
             </div>
             <button
               type="button"

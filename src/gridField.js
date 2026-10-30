@@ -1,11 +1,11 @@
 import { hexToRgb, hslToHex, rgbToHsl } from './palette.js'
 import { metricsAt } from './profileTrack.js'
-import { PAPER, mulberry32 } from './shapeLayout.js'
+import { PAPER, labelKind, mulberry32 } from './shapeLayout.js'
 import { paramsAt } from './metaballs.js'
 
 const DT = 1 / 30
-const MAX_SHAPES = 28
-const ANIM = 0.25
+const MAX_SHAPES = 56
+const SPRING = 0.58
 
 const VERT = `#version 300 es
 void main() {
@@ -20,9 +20,9 @@ uniform vec3 uPaper;
 uniform vec3 uColors[8];
 uniform int uGroups;
 uniform int uCount;
-uniform vec4 uRect[28];
-uniform vec4 uInfo[28];
-uniform vec4 uClip[28];
+uniform vec4 uRect[56];
+uniform vec4 uInfo[56];
+uniform vec4 uClip[56];
 uniform float uFillet;
 uniform float uOpacity;
 uniform float uStripe;
@@ -48,7 +48,7 @@ void main() {
   p.y = uResolution.y - p.y;
   float dist[8];
   for (int group = 0; group < 8; group++) dist[group] = 100000.0;
-  for (int i = 0; i < 28; i++) {
+  for (int i = 0; i < 56; i++) {
     if (i >= uCount) break;
     if (uInfo[i].z > 0.5) continue;
     float d = sdRoundBox(p, uRect[i].xy, uRect[i].zw, uInfo[i].x);
@@ -60,7 +60,7 @@ void main() {
     if (group >= uGroups) break;
     color = mix(color, uColors[group], coverOf(dist[group]) * uOpacity);
   }
-  for (int i = 0; i < 28; i++) {
+  for (int i = 0; i < 56; i++) {
     if (i >= uCount) break;
     if (uInfo[i].z < 0.5) continue;
     float bar = sdRoundBox(p, uRect[i].xy, uRect[i].zw, uInfo[i].x);
@@ -83,9 +83,17 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
-function easeOut(amount) {
+function springEase(amount) {
   const t = clamp(amount, 0, 1)
-  return 1 - (1 - t) ** 3
+  if (t >= 1) return 1
+  const decay = Math.exp(-7.9 * t)
+  return 1 - decay * Math.cos(t * Math.PI * 2.15)
+}
+
+function sizeWobble(amount) {
+  const t = clamp(amount, 0, 1)
+  if (t >= 1) return 1
+  return 1 + 0.055 * Math.sin(t * Math.PI * 2.2) * Math.exp(-3.1 * t)
 }
 
 function motionOf(spec) {
@@ -256,15 +264,16 @@ function addShape(shapes, map, spec) {
   return shape
 }
 
-function addMass(rand, shapes, map, cols, rows, origin) {
+function addMass(rand, shapes, map, cols, rows, origin, options = {}) {
+  const compact = Boolean(options.compact)
   const vertical = rand() < (rows > cols ? 0.62 : 0.35)
   const axis = vertical ? 'v' : 'h'
   let thick = 3 + Math.floor(rand() * 2)
-  let span = thick + 1 + Math.floor(rand() * 3)
+  let span = compact ? thick + Math.floor(rand() * 2) : thick + 1 + Math.floor(rand() * 3)
   let spot = nearestSpot(rand, origin, cols, rows, map, axis, span, thick)
   if (!spot) {
     thick = 3
-    span = 4
+    span = compact ? 3 : 4
     spot = nearestSpot(rand, origin, cols, rows, map, axis, span, thick)
   }
   if (!spot) return null
@@ -278,6 +287,7 @@ function addMass(rand, shapes, map, cols, rows, origin) {
     primary: true,
     phase: rand() * Math.PI * 2,
   })
+  if (options.elbow === false) return main
   const elbowAxis = axis === 'h' ? 'v' : 'h'
   const elbowThick = 3
   const elbowSpan = 3 + Math.floor(rand() * 2)
@@ -306,9 +316,9 @@ function addMass(rand, shapes, map, cols, rows, origin) {
   return main
 }
 
-function addPill(rand, shapes, map, cols, rows, origin) {
+function addPill(rand, shapes, map, cols, rows, origin, compact = false) {
   const axis = rand() < (rows > cols ? 0.6 : 0.4) ? 'v' : 'h'
-  const span = 2 + Math.floor(rand() * 4)
+  const span = compact ? 2 + Math.floor(rand() * 2) : 2 + Math.floor(rand() * 4)
   const spot = nearestSpot(rand, origin, cols, rows, map, axis, span, 1)
   if (!spot) return false
   addShape(shapes, map, { ...spot, axis, span, thick: 1, color: 1, role: 'pill', phase: rand() * Math.PI * 2 })
@@ -353,28 +363,37 @@ function addStripes(rand, stripes, shape) {
 
 function buildLayout(params, dims) {
   const { cols, rows } = dims
+  const target = clamp(Math.round(params.count || 14), 4, 40)
   const rand = mulberry32((params.seed || 1) ^ 0x51ed)
   const map = Array.from({ length: rows }, () => Array(cols).fill(false))
   const shapes = []
-  const density = clamp((params.count - 8) / 24, 0, 1)
+  const fillCap = 0.65
+  const compact = target >= 28
   const first = clusterOrigin(rand, cols, rows)
-  const second = density > 0.35 || rand() < 0.55 ? clusterOrigin(rand, cols, rows, first) : null
-  const origins = second ? [first, second] : [first]
-  addMass(rand, shapes, map, cols, rows, origins[0])
-  if (second && filled(occupyMap(shapes, cols, rows)) < 0.34) addMass(rand, shapes, map, cols, rows, origins[1])
-  const pills = 2 + Math.round(density * 2)
-  const dots = 2 + Math.round(density * 2)
-  for (let index = 0; index < pills; index += 1) addPill(rand, shapes, map, cols, rows, origins[index % origins.length])
-  for (let index = 0; index < dots; index += 1) addDot(rand, shapes, map, cols, rows, origins[index % origins.length], index % 2 === 0 ? 2 : 3)
-  let guard = 0
-  while (filled(occupyMap(shapes, cols, rows)) < 0.5 && guard < 12) {
-    guard += 1
-    const origin = origins[guard % origins.length]
-    if (addPill(rand, shapes, map, cols, rows, origin) || addDot(rand, shapes, map, cols, rows, origin, guard % 2 === 0 ? 2 : 3)) continue
-    break
+  const origins = [first]
+  if (target >= 18) origins.push(clusterOrigin(rand, cols, rows, first))
+  addMass(rand, shapes, map, cols, rows, origins[0], { elbow: target >= 7 && !compact, compact })
+  if (origins[1] && target >= 20 && target < 32 && filled(occupyMap(shapes, cols, rows)) < 0.36) {
+    addMass(rand, shapes, map, cols, rows, origins[1], { elbow: false, compact: true })
   }
-  while (filled(occupyMap(shapes, cols, rows)) > 0.58) {
-    const index = shapes.findLastIndex((shape) => shape.role === 'pill' || shape.role === 'dot')
+  const pillTarget = target <= 6 ? 2 : Math.min(4, 2 + Math.floor((target - 6) / 10))
+  let pills = 0
+  let guard = 0
+  while (pills < pillTarget && guard < 16) {
+    guard += 1
+    if (filled(occupyMap(shapes, cols, rows)) >= fillCap) break
+    if (!addPill(rand, shapes, map, cols, rows, origins[pills % origins.length], compact)) break
+    pills += 1
+  }
+  let extra = 0
+  while (shapes.length < target && extra < 80) {
+    extra += 1
+    if (filled(occupyMap(shapes, cols, rows)) >= fillCap) break
+    const origin = origins[extra % origins.length]
+    if (!addDot(rand, shapes, map, cols, rows, origin, extra % 2 === 0 ? 2 : 3)) break
+  }
+  while (shapes.length > Math.max(4, target) && filled(occupyMap(shapes, cols, rows)) > fillCap) {
+    const index = shapes.findLastIndex((shape) => shape.role === 'dot')
     if (index < 0) break
     shapes.splice(index, 1)
   }
@@ -390,16 +409,18 @@ function buildLayout(params, dims) {
     label: '',
     pendingDrop: false,
     cascade: null,
+    goo: 0,
   }
 }
 
 function displayed(shape) {
-  const t = easeOut(shape.anim)
+  const t = springEase(shape.anim)
   return {
     col: shape.fromCol + (shape.toCol - shape.fromCol) * t,
     row: shape.fromRow + (shape.toRow - shape.fromRow) * t,
     span: shape.fromSpan + (shape.toSpan - shape.fromSpan) * t,
-    scale: shape.fromScale + (shape.toScale - shape.fromScale) * t,
+    scale: Math.max(0, shape.fromScale + (shape.toScale - shape.fromScale) * t),
+    wobble: sizeWobble(shape.anim),
     axis: shape.axis,
     thick: shape.thick || 1,
     color: shape.color,
@@ -526,6 +547,208 @@ function extendShape(state, dims, beat, allowRetract) {
   return true
 }
 
+function breakDroplet(state, dims, beat) {
+  if (filled(occupyMap(state.shapes, dims.cols, dims.rows)) > 0.62) return false
+  const masses = unlocked(state, beat, (shape) => shape.role === 'mass')
+  if (!masses.length) return false
+  const mass = masses[Math.floor(state.rand() * masses.length)]
+  const map = occupyMap(state.shapes, dims.cols, dims.rows)
+  const edges = []
+  for (const [col, row] of cellsOf(mass, mass.toCol, mass.toRow, mass.toSpan)) {
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nextCol = col + dc
+      const nextRow = row + dr
+      if (!inside(dims.cols, dims.rows, nextCol, nextRow) || map[nextRow][nextCol]) continue
+      let endCol = nextCol
+      let endRow = nextRow
+      let dist = 1
+      for (let step = 2; step <= 4; step += 1) {
+        const aheadCol = col + dc * step
+        const aheadRow = row + dr * step
+        if (!inside(dims.cols, dims.rows, aheadCol, aheadRow) || map[aheadRow][aheadCol]) break
+        endCol = aheadCol
+        endRow = aheadRow
+        dist = step
+      }
+      edges.push({ fromCol: col + dc * 0.22, fromRow: row + dr * 0.22, col: endCol, row: endRow, dist })
+    }
+  }
+  if (!edges.length) return false
+  const longer = edges.filter((edge) => edge.dist >= 2)
+  const pool = longer.length ? longer : edges
+  const edge = pool[Math.floor(state.rand() * pool.length)]
+  const shape = {
+    ...settled({
+      col: edge.col,
+      row: edge.row,
+      axis: 'c',
+      span: 1,
+      thick: 1,
+      color: mass.color,
+      role: 'dot',
+      phase: state.rand() * Math.PI * 2,
+    }),
+    fromCol: edge.fromCol,
+    fromRow: edge.fromRow,
+    fromScale: 0.7,
+    toScale: 1,
+    anim: 0,
+  }
+  lock(shape, beat)
+  lock(mass, beat)
+  state.shapes.push(shape)
+  return true
+}
+
+function mergeDroplet(state, dims, beat) {
+  const masses = state.shapes.filter((shape) => shape.role === 'mass' && shape.alive && shape.toScale > 0)
+  const dots = unlocked(state, beat, (shape) => shape.role === 'dot')
+  const pairs = []
+  for (const dot of dots) {
+    for (const mass of masses) {
+      if (dot.color !== mass.color) continue
+      pairs.push({ dot, mass, dist: Math.hypot(dot.toCol - mass.toCol, dot.toRow - mass.toRow) })
+    }
+  }
+  if (!pairs.length) return false
+  pairs.sort((a, b) => a.dist - b.dist)
+  const { dot, mass } = pairs[Math.floor(state.rand() * Math.min(3, pairs.length))]
+  let best = null
+  let bestDist = Infinity
+  for (const [col, row] of cellsOf(mass, mass.toCol, mass.toRow, mass.toSpan)) {
+    const dist = Math.hypot(col - dot.toCol, row - dot.toRow)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = [col, row]
+    }
+  }
+  if (!best || bestDist < 0.8) return false
+  begin(dot)
+  dot.toCol = best[0]
+  dot.toRow = best[1]
+  dot.toScale = 0.35
+  dot.absorb = true
+  lock(dot, beat)
+  lock(mass, beat)
+  return true
+}
+
+function alignedPair(a, b) {
+  if (a === b || a.color !== b.color || a.axis !== b.axis || a.role !== b.role || a.axis === 'c') return null
+  if (Math.round(a.thick || 1) !== Math.round(b.thick || 1)) return null
+  const aCol = Math.round(a.toCol)
+  const aRow = Math.round(a.toRow)
+  const bCol = Math.round(b.toCol)
+  const bRow = Math.round(b.toRow)
+  const aSpan = Math.round(a.toSpan)
+  const bSpan = Math.round(b.toSpan)
+  if (a.axis === 'v') {
+    if (aCol !== bCol) return null
+    const gap = bRow >= aRow ? bRow - (aRow + aSpan) : aRow - (bRow + bSpan)
+    if (gap < 0 || gap > 1) return null
+    const top = Math.min(aRow, bRow)
+    return {
+      host: aRow <= bRow ? a : b,
+      guest: aRow <= bRow ? b : a,
+      span: Math.max(aRow + aSpan, bRow + bSpan) - top,
+      col: aCol,
+      row: top,
+    }
+  }
+  if (aRow !== bRow) return null
+  const gap = bCol >= aCol ? bCol - (aCol + aSpan) : aCol - (bCol + bSpan)
+  if (gap < 0 || gap > 1) return null
+  const left = Math.min(aCol, bCol)
+  return {
+    host: aCol <= bCol ? a : b,
+    guest: aCol <= bCol ? b : a,
+    span: Math.max(aCol + aSpan, bCol + bSpan) - left,
+    col: left,
+    row: aRow,
+  }
+}
+
+function fusePair(state, beat) {
+  const pool = unlocked(state, beat, (shape) => shape.axis !== 'c' && shape.role !== 'dot')
+  for (let i = 0; i < pool.length; i += 1) {
+    for (let j = i + 1; j < pool.length; j += 1) {
+      const match = alignedPair(pool[i], pool[j])
+      if (!match) continue
+      const { host, guest, span, col, row } = match
+      if (span > (host.role === 'mass' ? 8 : 7)) continue
+      begin(host)
+      host.toCol = col
+      host.toRow = row
+      host.toSpan = span
+      host.toScale = 1
+      begin(guest)
+      guest.toCol = col + (host.axis === 'h' ? span * 0.35 : 0)
+      guest.toRow = row + (host.axis === 'v' ? span * 0.35 : 0)
+      guest.toScale = 0
+      guest.absorb = true
+      lock(host, beat)
+      lock(guest, beat)
+      return true
+    }
+  }
+  return false
+}
+
+function splitShape(state, dims, beat) {
+  const pool = unlocked(state, beat, (shape) => shape.role === 'pill' && shape.toSpan >= 4 && shape.axis !== 'c')
+  if (!pool.length) return false
+  const shape = pool[Math.floor(state.rand() * pool.length)]
+  const span = Math.round(shape.toSpan)
+  const keep = span - 2
+  if (keep < 2) return false
+  const vertical = shape.axis === 'v'
+  const originCol = Math.round(shape.toCol)
+  const originRow = Math.round(shape.toRow)
+  const cutCol = originCol + (vertical ? 0 : keep)
+  const cutRow = originRow + (vertical ? keep : 0)
+  const map = occupyMap(state.shapes, dims.cols, dims.rows)
+  for (const [col, row] of cellsOf(shape, shape.toCol, shape.toRow, shape.toSpan)) {
+    if (inside(dims.cols, dims.rows, col, row)) map[row][col] = false
+  }
+  const endCol = vertical ? cutCol : cutCol + 1
+  const endRow = vertical ? cutRow + 1 : cutRow
+  const fits = runFits(map, dims.cols, dims.rows, endCol, endRow, 2, shape.axis, 1)
+  const destCol = fits ? endCol : cutCol
+  const destRow = fits ? endRow : cutRow
+  if (!runFits(map, dims.cols, dims.rows, destCol, destRow, 2, shape.axis, 1)) return false
+  begin(shape)
+  shape.toSpan = keep
+  lock(shape, beat)
+  const piece = {
+    ...settled({
+      col: destCol,
+      row: destRow,
+      axis: shape.axis,
+      span: 2,
+      thick: 1,
+      color: shape.color,
+      role: 'pill',
+      phase: state.rand() * Math.PI * 2,
+    }),
+    fromCol: cutCol,
+    fromRow: cutRow,
+    fromSpan: 2,
+    anim: 0,
+  }
+  lock(piece, beat)
+  state.shapes.push(piece)
+  return true
+}
+
+function liquidChange(state, dims, beat) {
+  const roll = state.rand()
+  if (roll < 0.34) return breakDroplet(state, dims, beat)
+  if (roll < 0.5) return mergeDroplet(state, dims, beat)
+  if (roll < 0.68) return fusePair(state, beat)
+  if (roll < 0.84) return splitShape(state, dims, beat)
+  return false
+}
+
 function swapColor(state, beat) {
   const pool = unlocked(state, beat)
   if (!pool.length) return false
@@ -558,29 +781,48 @@ function filled(map) {
 
 function beatAllows(label, beat, metrics, cascade) {
   if (cascade) return true
+  const kind = labelKind(label)
   const phase = ((beat % 4) + 4) % 4
-  if (label === 'Peak') {
+  if (kind === 'High') {
+    const hot = (metrics?.bass || 0) > 0.5 || (metrics?.loud || 0) > 0.62
+    return hot ? true : phase !== 3
+  }
+  if (kind === 'Main' || kind === 'Drop' || kind === 'Peak') {
     const hot = (metrics?.bass || 0) > 0.45 || (metrics?.loud || 0) > 0.55
     return hot ? phase !== 3 : phase % 2 === 0
   }
-  if (label === 'Build') return phase % 2 === 0
+  if (kind === 'Build') return phase % 2 === 0
   return phase === 0
 }
 
 function oneChange(state, dims, beat, label, metrics, near) {
+  if (!near && liquidChange(state, dims, beat)) return true
+  const kind = labelKind(label)
   const bass = (metrics?.bass || 0) >= (metrics?.high || 0)
-  if (label === 'Build') return extendShape(state, dims, beat, false) || popCircle(state, dims, beat, near)
+  if (kind === 'Build' || kind === 'Drop') return extendShape(state, dims, beat, false) || popCircle(state, dims, beat, near) || breakDroplet(state, dims, beat)
   if (bass) return extendShape(state, dims, beat, true) || hopCircle(state, dims, beat, near) || popCircle(state, dims, beat, near)
   return hopCircle(state, dims, beat, near) || popCircle(state, dims, beat, near) || extendShape(state, dims, beat, true)
 }
 
 function stepGrid(state, time, dt, spec, dims) {
-  const duration = ANIM / motionOf(spec)
+  const duration = SPRING / motionOf(spec)
+  let moving = false
   for (const shape of state.shapes) {
-    if (shape.anim < 1) shape.anim = Math.min(1, shape.anim + dt / duration)
+    if (shape.anim < 1) {
+      shape.anim = Math.min(1, shape.anim + dt / duration)
+      moving = true
+    }
   }
+  state.shapes = state.shapes.filter((shape) => {
+    if (shape.absorb && shape.anim >= 1) return false
+    if (shape.toScale <= 0 && shape.anim >= 1) return false
+    return true
+  })
+  const goal = moving ? 1 : 0
+  const tau = goal > (state.goo || 0) ? 0.08 : 0.42
+  state.goo = (state.goo || 0) + (goal - (state.goo || 0)) * (1 - Math.exp(-Math.max(dt, 0.0001) / tau))
   const params = paramsAt(spec, time)
-  const enteredDrop = params.label === 'Drop' && state.label !== 'Drop'
+  const enteredDrop = labelKind(params.label) === 'Drop' && labelKind(state.label) !== 'Drop'
   state.label = params.label
   if (enteredDrop) state.pendingDrop = true
   const beatLen = 60 / Math.max(1, spec.tempo || 100)
@@ -589,7 +831,8 @@ function stepGrid(state, time, dt, spec, dims) {
   state.beat = beat
   const metrics = metricsAt(spec.profile, time)
   const phase = ((beat % 4) + 4) % 4
-  if (params.label === 'Peak' && phase === 0 && !state.cascade && state.rand() < 0.55) {
+  const kind = labelKind(params.label)
+  if ((kind === 'High' || kind === 'Main' || kind === 'Peak') && phase === 0 && !state.cascade && state.rand() < (kind === 'High' ? 0.7 : 0.5)) {
     const host = state.shapes.find((shape) => shape.alive && shape.toScale > 0)
     state.cascade = {
       left: (metrics?.bass || 0) > 0.5 ? 4 : 3,
@@ -645,8 +888,9 @@ function rectFor(view, dims, width, height, gutter, roundness, offsetX, offsetY)
   const across = (vertical ? cellW : cellH) * acrossCells
   const boxW = (vertical ? across : along) - gutter * 2
   const boxH = (vertical ? along : across) - gutter * 2
-  let hw = Math.max(1, boxW / 2) * view.scale
-  let hh = Math.max(1, boxH / 2) * view.scale
+  const wobble = view.wobble || 1
+  let hw = Math.max(1, boxW / 2) * view.scale * wobble
+  let hh = Math.max(1, boxH / 2) * view.scale * wobble
   const cx = (view.col + (vertical ? acrossCells : alongCells) / 2) * cellW + offsetX
   const cy = (view.row + (vertical ? alongCells : acrossCells) / 2) * cellH + offsetY
   if (circle) {
@@ -763,19 +1007,48 @@ function upload(state, spec, width, height) {
   const roundness = clamp(spec.roundness ?? 0.7, 0, 1)
   const offsetX = (params.offsetX || 0) * width
   const offsetY = (params.offsetY || 0) * height
-  const fillet = cell * 0.07
+  const restFillet = cell * 0.07
+  const fillet = restFillet + cell * 0.9 * clamp(state.goo || 0, 0, 1)
   const motion = motionOf(spec)
   const time = spec.time || 0
   const views = state.shapes.map(displayed)
   const solids = views.map((view) => (view.alive && view.scale > 0.02 ? rectFor(view, dims, width, height, gutter, roundness, offsetX, offsetY) : null))
-  joinTouching(solids, fillet, cell)
+  joinTouching(solids, restFillet, cell)
   const cellW = width / dims.cols
   const cellH = height / dims.rows
-  solids.forEach((shape) => {
-    if (!shape || shape.role !== 'dot') return
-    const wobble = Math.min(cellW, cellH) * 0.16
-    shape.cx += Math.sin(time * 0.8 * motion + shape.phase) * wobble
-    shape.cy += Math.cos(time * 0.62 * motion + shape.phase) * wobble
+  const bulbs = []
+  solids.forEach((shape, index) => {
+    const source = state.shapes[index]
+    if (!shape || !source) return
+    const growing = source.anim < 0.98 && source.toSpan > source.fromSpan + 0.05 && shape.axis !== 'c'
+    if (growing) {
+      const pulse = Math.sin(clamp(source.anim, 0, 1) * Math.PI)
+      const extend = Math.min(cellW, cellH) * 0.2 * pulse
+      if (shape.axis === 'h') {
+        shape.hw += extend * 0.5
+        shape.cx += extend * 0.5
+      } else if (shape.axis === 'v') {
+        shape.hh += extend * 0.5
+        shape.cy += extend * 0.5
+      }
+      if (pulse > 0.08) {
+        const radius = Math.min(shape.hw, shape.hh) * (0.9 + 0.34 * pulse)
+        bulbs.push({
+          cx: shape.axis === 'h' ? shape.cx + shape.hw * 0.72 : shape.cx,
+          cy: shape.axis === 'v' ? shape.cy + shape.hh * 0.72 : shape.cy,
+          hw: radius,
+          hh: radius,
+          radius,
+          color: shape.color,
+        })
+      }
+    }
+    if (shape.role !== 'dot') return
+    const settle = clamp((source.anim - 0.8) / 0.2, 0, 1)
+    if (settle <= 0) return
+    const drift = Math.min(cellW, cellH) * 0.16 * settle
+    shape.cx += Math.sin(time * 0.8 * motion + shape.phase) * drift
+    shape.cy += Math.cos(time * 0.62 * motion + shape.phase) * drift
   })
   const rects = new Float32Array(MAX_SHAPES * 4)
   const info = new Float32Array(MAX_SHAPES * 4)
@@ -792,6 +1065,18 @@ function upload(state, spec, width, height) {
     info[count * 4 + 1] = shape.color
     info[count * 4 + 2] = 0
     info[count * 4 + 3] = shape.radius
+    count += 1
+  }
+  for (const bulb of bulbs) {
+    if (count >= MAX_SHAPES) break
+    rects[count * 4] = bulb.cx
+    rects[count * 4 + 1] = bulb.cy
+    rects[count * 4 + 2] = bulb.hw
+    rects[count * 4 + 3] = bulb.hh
+    info[count * 4] = bulb.radius
+    info[count * 4 + 1] = bulb.color
+    info[count * 4 + 2] = 0
+    info[count * 4 + 3] = bulb.radius
     count += 1
   }
   for (const stripe of state.stripes || []) {

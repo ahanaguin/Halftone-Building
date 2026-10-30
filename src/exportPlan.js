@@ -24,8 +24,9 @@ export function lengthBounds(start, duration) {
 export function sectionEnergy(section, profile) {
   const timeline = profile?.timeline
   if (!timeline?.rms?.length) {
-    if (section.label === 'Peak') return 3
-    if (section.label === 'Build') return 2
+    const kind = String(section.label || '').replace(/\s+\d+$/, '')
+    if (kind === 'High' || kind === 'Drop' || kind === 'Peak') return 3
+    if (kind === 'Main' || kind === 'Build') return 2
     return 1
   }
   const start = Math.max(0, Math.floor(section.start / timeline.hop))

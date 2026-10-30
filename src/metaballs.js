@@ -3,6 +3,7 @@ import { metricsAt, unit } from './profileTrack.js'
 import {
   PAPER,
   SECTION_BLEND,
+  labelKind,
   leadColors,
   mulberry32,
   pickRecipe,
@@ -199,8 +200,9 @@ export function tuneOf(spec) {
 
 function resolveMode(label, composition) {
   if (composition === 'free' || composition === 'mirror' || composition === 'quad' || composition === 'radial' || composition === 'grid') return composition
-  if (label === 'Build') return 'quad'
-  if (label === 'Peak' || label === 'Drop') return 'radial'
+  const kind = labelKind(label)
+  if (kind === 'Build') return 'quad'
+  if (kind === 'Main' || kind === 'High' || kind === 'Drop' || kind === 'Peak') return 'radial'
   return 'mirror'
 }
 
@@ -227,9 +229,11 @@ function paletteEntries(spec) {
 }
 
 function gatherFor(label) {
-  if (label === 'Peak') return 1
-  if (label === 'Build') return 0.35
-  if (label === 'Drop') return 0.05
+  const kind = labelKind(label)
+  if (kind === 'High' || kind === 'Main' || kind === 'Peak') return 1
+  if (kind === 'Drop') return 0.72
+  if (kind === 'Build') return 0.35
+  if (kind === 'Break') return -0.2
   return -0.12
 }
 
@@ -253,7 +257,7 @@ function sectionParams(spec, section, sections) {
   return {
     seed,
     label: section?.label || 'Quiet',
-    count: shapeCount(recipe, edit?.count),
+    count: shapeCount(recipe, edit?.count, edit?.composition || 'auto'),
     scale: shapeScale(edit?.size),
     offsetX: edit?.x || 0,
     offsetY: edit?.y || 0,
@@ -529,7 +533,7 @@ function step(state, time, dt, spec) {
   const motion = motionOf(spec)
   const mdt = dt * motion
   state.spin += mdt * 0.16 * tempo * tune.spin
-  if (params.label === 'Drop') {
+  if (labelKind(params.label) === 'Drop') {
     if (!state.dropping) state.burst = 1
     state.dropping = true
   } else state.dropping = false

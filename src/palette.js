@@ -6,15 +6,20 @@ export const CALM_PALETTE = {
 
 export const MAX_SWATCHES = 6
 
+function sectionKind(label) {
+  return String(label || '').replace(/\s+\d+$/, '')
+}
+
 export function paletteForSection(label) {
-  if (label === 'Peak') {
+  const kind = sectionKind(label)
+  if (kind === 'High' || kind === 'Main' || kind === 'Drop' || kind === 'Peak') {
     return {
       colors: ['#ff5a36', '#ffb000', '#ff4d8d'],
       warmth: 0.88,
       lightness: 0.8,
     }
   }
-  if (label === 'Build') {
+  if (kind === 'Build') {
     return {
       colors: ['#e08a45', '#e0b15a', '#d46a78'],
       warmth: 0.6,
@@ -29,14 +34,15 @@ export function paletteForSection(label) {
 }
 
 export function explainSection(label) {
-  if (label === 'Quiet') {
+  const kind = sectionKind(label)
+  if (kind === 'Quiet' || kind === 'Intro' || kind === 'Break' || kind === 'Outro') {
     return 'This quieter part holds one calm poster. Loudness only shifts the size of those large shapes a little.'
   }
-  if (label === 'Build') {
+  if (kind === 'Build') {
     return 'The energy is rising, so the poster cuts across the frame with a few large shapes and thin guides.'
   }
-  if (label === 'Peak') {
-    return 'This is the loud part, so the poster opens into a burst or a beating grid. A drop cuts straight into another composition.'
+  if (kind === 'High' || kind === 'Main' || kind === 'Drop' || kind === 'Peak') {
+    return 'This is a loud part, so the poster opens into a burst or a beating grid. A drop cuts straight into another composition.'
   }
   return 'Each section holds one poster built from a few large shapes. Loudness shifts their size, and a drop cuts to a new one.'
 }

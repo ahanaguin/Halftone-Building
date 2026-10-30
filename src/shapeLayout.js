@@ -30,6 +30,10 @@ export function sectionKey(section) {
   return `${Number(section.start).toFixed(3)}:${section.label}`
 }
 
+export function labelKind(label) {
+  return String(label || 'Quiet').replace(/\s+\d+$/, '')
+}
+
 export function isHex(value) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
 }
@@ -78,8 +82,9 @@ export function sectionSeed(section, index) {
 }
 
 function energyOf(label) {
-  if (label === 'Peak') return 'high'
-  if (label === 'Build') return 'build'
+  const kind = labelKind(label)
+  if (kind === 'High' || kind === 'Main' || kind === 'Drop' || kind === 'Peak') return 'high'
+  if (kind === 'Build') return 'build'
   return 'calm'
 }
 
@@ -203,7 +208,7 @@ export function frameCut(time, tempo, seed) {
 }
 
 export function tensionAt(section, time, profile) {
-  if (!section || section.label !== 'Build') return 0
+  if (!section || labelKind(section.label) !== 'Build') return 0
   if (dropCount(profile, section.start, time || 0) > 0) return 0
   const span = Math.max(0.001, section.end - section.start)
   const t = Math.min(1, Math.max(0, ((time || 0) - section.start) / span))
@@ -333,13 +338,15 @@ export const SHAPE_RANGE = {
   grid: { min: 8, max: 32, count: 18 },
 }
 
+export const GRID_COUNT = { min: 4, max: 40, count: 14 }
+
 export function shapeScale(size) {
   if (size == null) return 1
   return 0.62 + (Math.min(100, Math.max(0, size)) / 100) * 0.76
 }
 
-export function shapeCount(recipe, count) {
-  const range = SHAPE_RANGE[recipe] || SHAPE_RANGE.eclipse
+export function shapeCount(recipe, count, composition) {
+  const range = composition === 'grid' ? GRID_COUNT : SHAPE_RANGE[recipe] || SHAPE_RANGE.eclipse
   const value = count == null ? range.count : count
   return Math.min(range.max, Math.max(range.min, Math.round(value)))
 }
