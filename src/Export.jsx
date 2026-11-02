@@ -14,6 +14,7 @@ import {
 } from './exportPlan.js'
 import { ExportCancelled, prepareEncoder, renderCover, renderFilm, renderLoop, resetFfmpeg, saveBlob, zipFiles } from './exportRender.js'
 import { profileTrack } from './profileTrack.js'
+import { workingSections } from './sectionEdit.js'
 import { useTrack } from './track.jsx'
 import { saveVisual } from './visuals.js'
 
@@ -70,9 +71,10 @@ export function Export() {
 
   const sections = useMemo(() => {
     if (!track) return []
-    if (track.sections?.length) return track.sections
+    const list = workingSections(track, studio)
+    if (list.length) return list
     return [{ start: 0, end: track.duration, label: 'Whole song' }]
-  }, [track])
+  }, [track, studio])
 
   useEffect(() => {
     sectionTouched.current = false

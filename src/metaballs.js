@@ -1,4 +1,4 @@
-import { hexToRgb, hslToHex, rgbToHsl } from './palette.js'
+import { hexToRgb, hslToHex, rgbToHsl, swatchHex } from './palette.js'
 import { metricsAt, unit } from './profileTrack.js'
 import {
   PAPER,
@@ -201,7 +201,7 @@ export function tuneOf(spec) {
 }
 
 function resolveMode(label, composition) {
-  if (composition === 'free' || composition === 'mirror' || composition === 'quad' || composition === 'radial' || composition === 'grid') return composition
+  if (composition === 'free' || composition === 'mirror' || composition === 'quad' || composition === 'radial') return composition
   const kind = labelKind(label)
   if (kind === 'Build') return 'quad'
   if (kind === 'Main' || kind === 'High' || kind === 'Drop' || kind === 'Peak') return 'radial'
@@ -272,7 +272,7 @@ function sectionParams(spec, section, sections) {
     offsetX: edit?.x || 0,
     offsetY: edit?.y || 0,
     composition: edit?.composition || 'auto',
-    colors: leadColors(paletteEntries(spec), index, edit?.colors),
+    colors: leadColors(entriesFor(spec, edit), index, edit?.colors),
   }
 }
 
@@ -476,9 +476,23 @@ function createState(spec) {
   }
 }
 
-function motionOf(spec) {
-  const slider = Number.isFinite(spec.speed) ? spec.speed : 50
-  return Math.pow(8, clamp(slider, 0, 100) / 100 - 0.5)
+function entriesFor(spec, edit) {
+  if (edit?.palette?.swatches?.length) {
+    return edit.palette.swatches.map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) }))
+  }
+  return paletteEntries(spec)
+}
+
+function motionOf(spec, time) {
+  let slider = Number.isFinite(spec.speed) ? spec.speed : 50
+  if (spec.sections?.length) {
+    const section = sectionAt(spec.sections, time || 0)
+    const edit = section ? spec.edits?.[sectionKey(section)] : null
+    if (edit?.speed != null) slider = edit.speed
+  }
+  const t = clamp(slider, 0, 100) / 100
+  if (t <= 0.5) return Math.pow(8, t - 0.5)
+  return Math.pow(20, (t - 0.5) * 2)
 }
 
 function biggestDropTimes(spec) {
@@ -611,7 +625,7 @@ function step(state, time, dt, spec) {
   state.foldElapsed = Math.min(FOLD_TIME, state.foldElapsed + dt)
   const foldT = state.foldElapsed / FOLD_TIME
   state.fold = foldT * foldT * (3 - 2 * foldT)
-  const motion = motionOf(spec)
+  const motion = motionOf(spec, time)
   const mdt = dt * motion
   state.spin += mdt * 0.16 * tempo * tune.spin
   let dropEdge = false

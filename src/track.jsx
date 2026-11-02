@@ -38,7 +38,7 @@ export function TrackProvider({ children }) {
       setStudio((current) => {
         const next = recipe(current)
         if (next === current) return current
-        setPast((items) => [...items.slice(-39), current])
+        setPast((items) => (items[items.length - 1] === current ? items : [...items.slice(-39), current]))
         return next
       })
     }
@@ -61,7 +61,7 @@ export function TrackProvider({ children }) {
     function commitStudio(base) {
       setStudio((current) => {
         if (!base || current === base) return current
-        setPast((items) => [...items.slice(-39), base])
+        setPast((items) => (items[items.length - 1] === base ? items : [...items.slice(-39), base]))
         return current
       })
     }

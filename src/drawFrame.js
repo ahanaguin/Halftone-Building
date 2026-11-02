@@ -2,6 +2,7 @@ import { paletteColors, swatchHex } from './palette.js'
 import { frameMode, paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
 import { paintGrid } from './gridField.js'
 import { metricsAt } from './profileTrack.js'
+import { workingSections } from './sectionEdit.js'
 import { PAPER, backgroundAt, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 
 let grainCanvas = null
@@ -57,11 +58,13 @@ export function paintFrame(ctx, spec) {
 }
 
 export function frameInput({ track, studio, profile, time, width, height }) {
-  const sections = track?.sections || []
+  const sections = workingSections(track, studio)
   const section = sectionAt(sections, time)
   const index = section ? sections.findIndex((item) => item.start === section.start && item.label === section.label) : 0
   const key = section ? sectionKey(section) : ''
-  const colors = paletteColors(studio.palette)
+  const edit = section ? studio.edits?.[key] : null
+  const palette = edit?.palette?.swatches?.length ? edit.palette : studio.palette
+  const colors = paletteColors(palette)
   const metrics = metricsAt(profile, time) || { loud: 0.35, bass: 0.4, high: 0.25, harsh: 0.2 }
   return {
     width,
@@ -72,14 +75,15 @@ export function frameInput({ track, studio, profile, time, width, height }) {
     edits: studio.edits || {},
     sections,
     profile,
-    roundness: studio.roundness ?? 0.7,
+    roundness: edit?.roundness ?? studio.roundness ?? 0.7,
     tempo: track?.bpm ?? 100,
     colors,
     palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
+    print: edit?.print !== false,
     tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
     background: backgroundAt({ background: studio.background, edits: studio.edits || {}, sections }, time),
     shine: studio.shine !== false,
-    speed: studio.speed ?? 50,
+    speed: edit?.speed ?? studio.speed ?? 50,
     sectionLabel: section?.label || '',
     loud: metrics.loud,
     bass: metrics.bass,

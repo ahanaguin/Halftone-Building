@@ -4,13 +4,28 @@ import {
   MAX_SWATCHES,
   artworkColor,
   hexToRgb,
+  hslToHex,
   paletteColors,
   rgbToHsl,
   shiftUnlocked,
   swatchHex,
 } from './palette.js'
 import { metricsAt, profileTrack, unit, windowFeatures } from './profileTrack.js'
-import { GRID_COUNT, INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import {
+  boundaryLimits,
+  cleanLabel,
+  copyKey,
+  dropKey,
+  freshSeed,
+  mergeAt,
+  moveKey,
+  sameSections,
+  snapBoundary,
+  splitAt,
+  withBoundary,
+  workingSections,
+} from './sectionEdit.js'
+import { INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
 import { useTrack } from './track.jsx'
@@ -18,14 +33,15 @@ import { useTrack } from './track.jsx'
 const FORMATS = ['9:16', '1:1', '16:9']
 const MAX_BACKGROUNDS = 8
 
-function backgroundChoicesOf(studio) {
+function backgroundChoicesOf(studio, paletteSource) {
   const extras = []
   for (const hex of studio.backgrounds || []) {
     if (!isHex(hex)) continue
     if (extras.some((item) => item.toLowerCase() === hex.toLowerCase())) continue
     extras.push(hex)
   }
-  const palette = (studio.palette?.swatches || []).map((swatch) => swatchHex(swatch))
+  const source = paletteSource?.swatches || studio.palette?.swatches || []
+  const palette = source.map((swatch) => swatchHex(swatch))
   const room = Math.max(0, MAX_BACKGROUNDS - 2 - extras.length)
   const choices = [
     { hex: PAPER, label: 'Off-white' },
@@ -35,10 +51,10 @@ function backgroundChoicesOf(studio) {
     if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
     choices.push({ hex, label: `Color ${index + 1}` })
   })
-  extras.forEach((hex) => {
+    extras.forEach((hex) => {
     if (choices.length >= MAX_BACKGROUNDS) return
     if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
-    choices.push({ hex, label: 'Custom color' })
+    choices.push({ hex, label: 'Custom color', custom: true })
   })
   return choices
 }
@@ -82,7 +98,7 @@ function PauseIcon() {
 }
 
 export function Studio() {
-  const { track, studio, editStudio, syncStudio, commitStudio } = useTrack()
+  const { track, studio, editStudio, syncStudio, commitStudio, undoStudio } = useTrack()
   const [format, setFormat] = useState('16:9')
   const [section, setSection] = useState(null)
   const [playing, setPlaying] = useState(false)
@@ -95,6 +111,11 @@ export function Studio() {
   const [arrangementAck, setArrangementAck] = useState(null)
   const [compositionAck, setCompositionAck] = useState(null)
   const [backgroundAck, setBackgroundAck] = useState(null)
+  const [picker, setPicker] = useState(null)
+  const [renaming, setRenaming] = useState(null)
+  const [resetAsk, setResetAsk] = useState(false)
+  const [hotBoundary, setHotBoundary] = useState(null)
+  const pickerRef = useRef(null)
   const toastTimer = useRef(null)
   const slotRef = useRef(null)
   const sideRef = useRef(null)
@@ -107,8 +128,11 @@ export function Studio() {
   const studioRef = useRef(studio)
   const slideOrigin = useRef(null)
   const placeDrag = useRef(null)
-  const backgroundPicker = useRef(null)
   const playToggle = useRef(null)
+  const undoRef = useRef(null)
+  const splitRef = useRef(null)
+  const resizeDrag = useRef(null)
+  const renameCommit = useRef(false)
   const sizeRef = useRef(size)
   const liveRef = useRef({
     loud: 0.35,
@@ -135,26 +159,30 @@ export function Studio() {
   studioRef.current = studio
   sizeRef.current = size
   if (track?.profile?.timeline) profileRef.current = track.profile
+  const sections = workingSections(track, studio)
 
-  const colors = paletteColors(studio.palette)
-  const artwork = artworkColor(colors)
   const activeKey = section ? sectionKey(section) : ''
+  const activeEdit = activeKey ? studio.edits?.[activeKey] || {} : {}
+  const activePalette = activeEdit.palette?.swatches?.length ? activeEdit.palette : studio.palette
+  const colors = paletteColors(activePalette)
+  const artwork = artworkColor(colors)
   liveRef.current = {
     ...liveRef.current,
     tempo: track?.bpm ?? liveRef.current.tempo ?? 100,
     colors,
-    roundness: studio.roundness,
+    roundness: activeEdit.roundness ?? studio.roundness,
     seed: studio.seeds[activeKey] ?? liveRef.current.seed,
-    sections: track?.sections || [],
+    sections,
     seeds: studio.seeds,
     edits: studio.edits || {},
     palette: (studio.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) })),
     profile: profileRef.current,
     sectionLabel: section?.label || '',
     tune: { ...TUNE_DEFAULTS, ...(studio.tune || {}) },
-    background: backgroundAt({ background: studio.background, edits: studio.edits || {}, sections: track?.sections || [] }, audioRef.current?.currentTime || section?.start || 0),
+    background: backgroundAt({ background: studio.background, edits: studio.edits || {}, sections }, audioRef.current?.currentTime || section?.start || 0),
     shine: studio.shine !== false,
-    speed: studio.speed ?? 50,
+    speed: activeEdit.speed ?? studio.speed ?? 50,
+    print: activeEdit.print !== false,
   }
 
   useEffect(() => {
@@ -165,16 +193,35 @@ export function Studio() {
     }
     const url = URL.createObjectURL(track.file)
     setAudioUrl(url)
-    setSection(track.sections?.[0] ?? null)
+    const override = studioRef.current.sections
+    let list = track.sections || []
+    if (override?.length) {
+      const duration = track.duration || 0
+      const fits = Math.abs(override[0].start) < 0.05 && Math.abs(override[override.length - 1].end - duration) < 0.5
+      const contiguous = override.every((item, index) => index === 0 || Math.abs(item.start - override[index - 1].end) < 0.05)
+      if (fits && contiguous) list = override
+      else {
+        syncStudio((current) => {
+          if (!current.sections) return current
+          const next = { ...current }
+          delete next.sections
+          return next
+        })
+      }
+    }
+    setSection(list[0] ?? null)
+    setRenaming(null)
+    setResetAsk(false)
     return () => URL.revokeObjectURL(url)
   }, [track])
 
   useEffect(() => {
-    if (!track?.sections?.length) return
+    const list = workingSections(track, studio)
+    if (!list.length) return
     syncStudio((current) => {
       let changed = false
-      const seeds = { ...current.seeds }
-      track.sections.forEach((item, index) => {
+      const seeds = { ...(current.seeds || {}) }
+      workingSections(track, current).forEach((item, index) => {
         const key = sectionKey(item)
         if (seeds[key] == null) {
           seeds[key] = sectionSeed(item, index)
@@ -183,7 +230,19 @@ export function Studio() {
       })
       return changed ? { ...current, seeds } : current
     })
-  }, [track, syncStudio])
+  }, [track, studio.sections])
+
+  useEffect(() => {
+    const list = workingSections(track, studio)
+    if (!list.length) return
+    setSection((current) => {
+      if (!current) return list[0]
+      const exact = list.find((item) => item.label === current.label && Math.abs(item.start - current.start) < 0.0005 && Math.abs(item.end - current.end) < 0.0005)
+      if (exact) return exact
+      const midpoint = Math.min(Math.max((current.start + current.end) / 2, list[0].start), list[list.length - 1].end - 0.001)
+      return sectionAt(list, midpoint) || list[0]
+    })
+  }, [studio.sections, track])
 
   useEffect(() => {
     if (!track?.file || track.profile?.timeline) return undefined
@@ -235,28 +294,33 @@ export function Studio() {
         const ratio = Math.min(1, Math.max(0, audio.currentTime / currentTrack.duration))
         if (playheadRef.current) playheadRef.current.style.left = `${ratio * 100}%`
         if (waveRef.current) waveRef.current.setAttribute('aria-valuenow', String(Math.round(ratio * 100)))
-        const next = sectionAt(currentTrack.sections, audio.currentTime)
-        setSection((current) => (current?.start === next?.start ? current : next))
         const studioNow = studioRef.current
+        const list = workingSections(currentTrack, studioNow)
+        const next = sectionAt(list, audio.currentTime)
+        setSection((current) => (
+          current && next && current.start === next.start && current.end === next.end && current.label === next.label ? current : next
+        ))
         const key = next ? sectionKey(next) : ''
-        const paletteColorsNow = paletteColors(studioNow.palette)
+        const playingEdit = key ? studioNow.edits?.[key] || {} : {}
+        const playingPalette = playingEdit.palette?.swatches?.length ? playingEdit.palette : studioNow.palette
         const live = liveRef.current
         live.tempo = currentTrack.bpm ?? 100
         live.time = audio.currentTime
-        live.colors = paletteColorsNow
-        live.roundness = studioNow.roundness
+        live.colors = paletteColors(playingPalette)
+        live.roundness = playingEdit.roundness ?? studioNow.roundness
         live.seed = studioNow.seeds[key] ?? 1
-        live.sections = currentTrack.sections || []
+        live.sections = list
         live.seeds = studioNow.seeds
         live.edits = studioNow.edits || {}
         live.palette = (studioNow.palette?.swatches || []).map((swatch) => ({ id: swatch.id, hex: swatchHex(swatch) }))
         live.profile = profile
         live.sectionLabel = next?.label || ''
         live.tune = { ...TUNE_DEFAULTS, ...(studioNow.tune || {}) }
-        live.background = backgroundAt({ background: studioNow.background, edits: studioNow.edits || {}, sections: currentTrack.sections || [] }, audio.currentTime)
+        live.background = backgroundAt({ background: studioNow.background, edits: studioNow.edits || {}, sections: list }, audio.currentTime)
         if (holderRef.current) holderRef.current.style.background = live.background
         live.shine = studioNow.shine !== false
-        live.speed = studioNow.speed ?? 50
+        live.speed = playingEdit.speed ?? studioNow.speed ?? 50
+        live.print = playingEdit.print !== false
         const shown = pickRecipe(live.seed, live.sectionLabel || 'Quiet', live.roundness ?? 0.7)
         if (shown !== posterRef.current) {
           posterRef.current = shown
@@ -320,15 +384,30 @@ export function Studio() {
   playToggle.current = togglePlay
 
   useEffect(() => {
-    function onKey(event) {
-      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
-      const target = event.target
+    function typingOf(target) {
       const tag = target?.tagName
-      const typing =
+      return (
         tag === 'TEXTAREA' ||
         tag === 'SELECT' ||
         target?.isContentEditable ||
         (tag === 'INPUT' && ['text', 'search', 'email', 'url', 'password', 'number', 'color'].includes((target.type || 'text').toLowerCase()))
+      )
+    }
+    function onKey(event) {
+      const typing = typingOf(event.target)
+      if ((event.metaKey || event.ctrlKey) && event.code === 'KeyZ' && !event.shiftKey && !event.altKey) {
+        if (typing) return
+        event.preventDefault()
+        undoRef.current?.()
+        return
+      }
+      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
+      if (event.code === 'KeyS') {
+        if (typing) return
+        event.preventDefault()
+        splitRef.current?.()
+        return
+      }
       if (event.code === 'KeyT') {
         if (typing) return
         event.preventDefault()
@@ -377,9 +456,26 @@ export function Studio() {
     else editStudio(apply)
   }
 
+  function writePalette(recipe) {
+    if (!section) {
+      paintPalette(recipe)
+      return
+    }
+    const key = sectionKey(section)
+    const apply = (current) => {
+      const previous = current.edits?.[key] || {}
+      const base = previous.palette?.swatches?.length ? previous.palette : current.palette
+      const nextPalette = recipe(base)
+      if (nextPalette === base) return current
+      return { ...current, edits: { ...(current.edits || {}), [key]: { ...previous, palette: nextPalette } } }
+    }
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
   function onWarmth(event) {
     const warmth = 1 - Number(event.target.value) / 100
-    paintPalette((palette) => {
+    writePalette((palette) => {
       if (warmth === palette.warmth) return palette
       return {
         ...palette,
@@ -392,7 +488,7 @@ export function Studio() {
 
   function onLightness(event) {
     const lightness = Number(event.target.value) / 100
-    paintPalette((palette) => {
+    writePalette((palette) => {
       if (lightness === palette.lightness) return palette
       return {
         ...palette,
@@ -405,49 +501,37 @@ export function Studio() {
 
   function onRoundness(event) {
     const roundness = 1 - Number(event.target.value) / 100
-    const apply = (current) => (current.roundness === roundness ? current : { ...current, roundness })
-    if (slideOrigin.current) syncStudio(apply)
-    else editStudio(apply)
+    if (!section) {
+      const apply = (current) => (current.roundness === roundness ? current : { ...current, roundness })
+      if (slideOrigin.current) syncStudio(apply)
+      else editStudio(apply)
+      return
+    }
+    writeSection({ roundness })
   }
 
   function onPick(id, hex) {
     const [red, green, blue] = hexToRgb(hex)
     const [h, s, l] = rgbToHsl(red, green, blue)
-    const apply = (current) => ({
-      ...current,
-      palette: {
-        ...current.palette,
-        source: 'custom',
-        swatches: current.palette.swatches.map((swatch) => (swatch.id === id ? { ...swatch, h, s, l } : swatch)),
-      },
-    })
-    if (slideOrigin.current) syncStudio(apply)
-    else editStudio(apply)
+    writePalette((palette) => ({
+      ...palette,
+      source: 'custom',
+      swatches: palette.swatches.map((swatch) => (swatch.id === id ? { ...swatch, h, s, l } : swatch)),
+    }))
   }
 
-  function onAddColor() {
-    editStudio((current) => {
-      const swatches = current.palette.swatches
-      if (swatches.length >= MAX_SWATCHES) return current
-      const last = swatches[swatches.length - 1]
-      return {
-        ...current,
-        palette: {
-          ...current.palette,
-          source: 'custom',
-          swatches: [
-            ...swatches,
-            {
-              id: `swatch-add-${Date.now().toString(36)}-${swatches.length}`,
-              h: (last.h + 46) % 360,
-              s: Math.min(0.9, Math.max(0.35, last.s)),
-              l: last.l,
-              locked: false,
-            },
-          ],
-        },
-      }
-    })
+  function suggestHex(palette) {
+    const last = palette.swatches[palette.swatches.length - 1]
+    return hslToHex((last.h + 46) % 360, Math.min(0.9, Math.max(0.35, last.s)), last.l)
+  }
+
+  function openPicker(event, draft) {
+    const side = sideRef.current?.getBoundingClientRect()
+    const anchor = event.currentTarget.getBoundingClientRect()
+    const width = 232
+    const left = Math.max(12, (side?.left || anchor.left) - width - 16)
+    const top = Math.min(window.innerHeight - 300, Math.max(12, anchor.top - 12))
+    setPicker({ ...draft, left, top })
   }
 
   function onStyle(event) {
@@ -501,16 +585,16 @@ export function Studio() {
   }
 
   function modeOf(edit) {
-    return ['free', 'mirror', 'quad', 'radial', 'grid'].includes(edit?.composition) ? edit.composition : 'auto'
+    return ['free', 'mirror', 'quad', 'radial'].includes(edit?.composition) ? edit.composition : 'auto'
   }
 
   function applyComposition() {
-    if (!track?.sections?.length) return
+    if (!sections.length) return
     const mode = modeOf(studio.edits?.[activeKey])
     editStudio((current) => {
       const edits = { ...(current.edits || {}) }
       let changed = false
-      for (const item of track.sections) {
+      for (const item of workingSections(track, current)) {
         const key = sectionKey(item)
         const previous = edits[key] || {}
         if ((previous.composition || 'auto') === mode) continue
@@ -519,36 +603,18 @@ export function Studio() {
       }
       return changed ? { ...current, edits } : current
     })
-    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', grid: 'Grid' }[mode]
+    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial' }[mode]
     setCompositionAck(mode)
     showToast(`${name} applied to all sections.`)
   }
 
-  function onSectionBackground(value) {
-    setBackgroundAck(null)
-    writeSection({ background: value })
-  }
-
-  function onBackgroundPicked(event) {
-    const hex = event.target.value
-    if (!isHex(hex)) return
-    setBackgroundAck(null)
-    editStudio((current) => {
-      const known = backgroundChoicesOf(current).some((item) => item.hex.toLowerCase() === hex.toLowerCase())
-      const backgrounds = known || backgroundChoicesOf(current).length >= MAX_BACKGROUNDS ? current.backgrounds || [] : [...(current.backgrounds || []), hex]
-      const edits = { ...(current.edits || {}) }
-      if (activeKey) edits[activeKey] = { ...(edits[activeKey] || {}), background: hex }
-      return { ...current, backgrounds, edits }
-    })
-  }
-
   function applyBackground() {
-    if (!track?.sections?.length) return
+    if (!sections.length) return
     const hex = isHex(studio.edits?.[activeKey]?.background) ? studio.edits[activeKey].background : studio.background || PAPER
     editStudio((current) => {
       const edits = { ...(current.edits || {}) }
       let changed = false
-      for (const item of track.sections) {
+      for (const item of workingSections(track, current)) {
         const key = sectionKey(item)
         const previous = edits[key] || {}
         if ((previous.background || '').toLowerCase() === hex.toLowerCase()) continue
@@ -567,9 +633,47 @@ export function Studio() {
 
   function onSpeed(event) {
     const value = Number(event.target.value)
-    const apply = (current) => (current.speed === value ? current : { ...current, speed: value })
-    if (slideOrigin.current) syncStudio(apply)
-    else editStudio(apply)
+    if (!section) {
+      const apply = (current) => (current.speed === value ? current : { ...current, speed: value })
+      if (slideOrigin.current) syncStudio(apply)
+      else editStudio(apply)
+      return
+    }
+    writeSection({ speed: value })
+  }
+
+  function commitBackground(hex, previous, custom) {
+    if (!isHex(hex)) return
+    setBackgroundAck(null)
+    editStudio((current) => {
+      let backgrounds = [...(current.backgrounds || [])]
+      const choices = backgroundChoicesOf(current, activePalette)
+      const known = choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())
+      if (custom && previous && previous.toLowerCase() !== hex.toLowerCase()) backgrounds = backgrounds.map((item) => (item.toLowerCase() === previous.toLowerCase() ? hex : item))
+      else if (!known && choices.length < MAX_BACKGROUNDS) backgrounds.push(hex)
+      const edits = { ...(current.edits || {}) }
+      if (activeKey) edits[activeKey] = { ...(edits[activeKey] || {}), background: hex }
+      return { ...current, backgrounds, edits }
+    })
+  }
+
+  function commitPicker(event) {
+    event.preventDefault()
+    if (!picker || !isHex(picker.hex)) return
+    if (picker.target === 'palette' && picker.mode === 'add') {
+      const [red, green, blue] = hexToRgb(picker.hex)
+      const [h, s, l] = rgbToHsl(red, green, blue)
+      writePalette((palette) => {
+        if (palette.swatches.length >= MAX_SWATCHES) return palette
+        return {
+          ...palette,
+          source: 'custom',
+          swatches: [...palette.swatches, { id: `swatch-add-${Date.now().toString(36)}`, h, s, l, locked: false }],
+        }
+      })
+    } else if (picker.target === 'palette') onPick(picker.id, picker.hex)
+    else commitBackground(picker.hex, picker.previous, picker.custom)
+    setPicker(null)
   }
 
   function onPerColor(event) {
@@ -616,6 +720,10 @@ export function Studio() {
           edit.x ||
           edit.y ||
           isHex(edit.background) ||
+          edit.palette?.swatches?.length ||
+          edit.roundness != null ||
+          edit.speed != null ||
+          edit.print != null ||
           (edit.composition && edit.composition !== 'auto')),
     )
     if (!edited) {
@@ -665,42 +773,76 @@ export function Studio() {
   }
 
   useEffect(() => {
-    const index = section && track?.sections
-      ? track.sections.findIndex((item) => item.start === section.start && item.label === section.label)
+    const index = section
+      ? sections.findIndex((item) => item.start === section.start && item.label === section.label)
       : 0
     const seed = studio.seeds[activeKey] ?? (section ? sectionSeed(section, Math.max(0, index)) : 1)
     const shown = pickRecipe(seed, section?.label || 'Quiet', studio.roundness)
     posterRef.current = shown
     setPoster(shown)
-  }, [activeKey, section, studio.seeds, studio.roundness, track])
+  }, [activeKey, section, studio.seeds, studio.roundness, activeEdit.roundness, sections])
 
-  const warmth = Math.round((1 - studio.palette.warmth) * 100)
-  const lightness = Math.round(studio.palette.lightness * 100)
-  const spiky = Math.round((1 - studio.roundness) * 100)
+  useEffect(() => {
+    if (!picker) return undefined
+    function finish() {
+      if (picker.target === 'background' && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
+        const revert = picker.revert
+        editStudio((current) => {
+          const edits = { ...(current.edits || {}) }
+          const previous = { ...(edits[activeKey] || {}) }
+          if (revert) previous.background = revert
+          else delete previous.background
+          if (Object.keys(previous).length) edits[activeKey] = previous
+          else delete edits[activeKey]
+          return { ...current, edits }
+        })
+      }
+      setPicker(null)
+    }
+    function onKey(event) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      finish()
+    }
+    function onPointer(event) {
+      if (pickerRef.current?.contains(event.target)) return
+      finish()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointer)
+    }
+  }, [picker, activeKey])
+
+  const warmth = Math.round((1 - (activePalette.warmth ?? 0.5)) * 100)
+  const lightness = Math.round((activePalette.lightness ?? 0.5) * 100)
+  const spiky = Math.round((1 - (activeEdit.roundness ?? studio.roundness ?? 0.7)) * 100)
   const shapesOn = studio.style === 'shapes'
   const sectionEdit = studio.edits?.[activeKey] || {}
-  const composition = ['free', 'mirror', 'quad', 'radial', 'grid'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
-  const shapeRange = composition === 'grid' ? GRID_COUNT : SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
+  const composition = ['free', 'mirror', 'quad', 'radial'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
+  const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
   const sizeValue = sectionEdit.size ?? 50
   const countValue = Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
   const enabledColors =
     sectionEdit.colors?.length >= 2
-      ? studio.palette.swatches.filter((swatch) => sectionEdit.colors.includes(swatch.id)).map((swatch) => swatch.id)
-      : studio.palette.swatches.map((swatch) => swatch.id)
+      ? activePalette.swatches.filter((swatch) => sectionEdit.colors.includes(swatch.id)).map((swatch) => swatch.id)
+      : activePalette.swatches.map((swatch) => swatch.id)
   const colorGroups = Math.max(1, enabledColors.length)
   const perMax = Math.min(8, Math.max(4, Math.floor(32 / colorGroups)))
   const perColor = Math.min(perMax, Math.max(4, Math.round(countValue / colorGroups)))
   const tune = { ...TUNE_DEFAULTS, ...(studio.tune || {}) }
-  const background = backgroundAt({ background: studio.background, edits: studio.edits || {}, sections: track?.sections || [] }, audioRef.current?.currentTime || section?.start || 0)
+  const background = backgroundAt({ background: studio.background, edits: studio.edits || {}, sections }, audioRef.current?.currentTime || section?.start || 0)
   const sectionBackground = isHex(sectionEdit.background) ? sectionEdit.background : studio.background || PAPER
   const shineOn = studio.shine !== false
-  const motion = studio.speed ?? 50
+  const motion = activeEdit.speed ?? studio.speed ?? 50
   const compositionUniform = Boolean(
-    track?.sections?.length && track.sections.every((item) => modeOf(studio.edits?.[sectionKey(item)]) === composition),
+    sections.length && sections.every((item) => modeOf(studio.edits?.[sectionKey(item)]) === composition),
   )
   const backgroundUniform = Boolean(
-    track?.sections?.length &&
-      track.sections.every((item) => {
+    sections.length &&
+      sections.every((item) => {
         const saved = studio.edits?.[sectionKey(item)]?.background
         const hex = isHex(saved) ? saved : studio.background || PAPER
         return hex.toLowerCase() === sectionBackground.toLowerCase()
@@ -711,7 +853,160 @@ export function Studio() {
   const compositionApplied = compositionAck === composition && compositionUniform
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
   const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
-  const backgroundChoices = backgroundChoicesOf(studio)
+  const backgroundChoices = backgroundChoicesOf(studio, activePalette)
+  const sectionIndex = sections.findIndex((item) => section && item.label === section.label && Math.abs(item.start - section.start) < 0.0005)
+  const canMerge = sectionIndex >= 0 && sectionIndex < sections.length - 1
+
+  function cloneList(list) {
+    return list.map((item) => ({ start: item.start, end: item.end, label: item.label }))
+  }
+
+  function splitHere() {
+    const list = workingSections(track, studioRef.current)
+    const time = audioRef.current?.currentTime
+    if (!list.length || !Number.isFinite(time)) {
+      showToast('Need at least 4 seconds on each side.')
+      return
+    }
+    const result = splitAt(list, time)
+    if (!result) {
+      showToast('Need at least 4 seconds on each side.')
+      return
+    }
+    const from = sectionKey(list[result.index])
+    const cloned = cloneList(result.sections)
+    const created = cloned[result.index + 1]
+    const rightKey = sectionKey(created)
+    editStudio((current) => ({
+      ...current,
+      sections: cloned,
+      edits: copyKey(current.edits, from, rightKey),
+      seeds: { ...(current.seeds || {}), [rightKey]: freshSeed(created, result.index + 1) },
+    }))
+    setSection(created)
+    setRenaming(null)
+    setResetAsk(false)
+  }
+
+  function mergeSection(index) {
+    const list = workingSections(track, studioRef.current)
+    const result = mergeAt(list, index)
+    if (!result) {
+      showToast('No section after this one.')
+      return
+    }
+    const cloned = cloneList(result.sections)
+    const rightKey = sectionKey(result.right)
+    editStudio((current) => ({
+      ...current,
+      sections: cloned,
+      edits: dropKey(current.edits, rightKey),
+      seeds: dropKey(current.seeds, rightKey),
+    }))
+    setSection(cloned[index])
+    setRenaming(null)
+    setResetAsk(false)
+  }
+
+  function saveRename() {
+    const current = renaming
+    renameCommit.current = true
+    setRenaming(null)
+    if (!current) return
+    const label = cleanLabel(current.value)
+    const list = workingSections(track, studioRef.current)
+    const index = list.findIndex((item) => sectionKey(item) === current.key)
+    if (index < 0 || !label || label === list[index].label) return
+    const after = { ...list[index], label }
+    const next = list.map((item, itemIndex) => (itemIndex === index ? after : { ...item }))
+    const from = sectionKey(list[index])
+    const to = sectionKey(after)
+    editStudio((studioNow) => ({
+      ...studioNow,
+      sections: next,
+      edits: moveKey(studioNow.edits, from, to),
+      seeds: moveKey(studioNow.seeds, from, to),
+    }))
+    setSection(after)
+  }
+
+  function askReset() {
+    const list = workingSections(track, studioRef.current)
+    if (sameSections(list, track?.sections || [])) {
+      showToast('Already the detected sections.')
+      setResetAsk(false)
+      return
+    }
+    setResetAsk(true)
+  }
+
+  function confirmReset() {
+    const original = cloneList(track?.sections || [])
+    setResetAsk(false)
+    setRenaming(null)
+    editStudio((current) => ({ ...current, sections: original }))
+    setSection(original[0] || null)
+    showToast('Sections reset.')
+  }
+
+  function finishBoundary(event) {
+    const drag = resizeDrag.current
+    if (!drag || drag.done || event.pointerId !== drag.id) return
+    drag.done = true
+    resizeDrag.current = null
+    setHotBoundary(null)
+    commitStudio(drag.origin)
+  }
+
+  function onBoundaryDown(event, index) {
+    event.preventDefault()
+    event.stopPropagation()
+    const list = cloneList(workingSections(track, studioRef.current))
+    const limits = boundaryLimits(list, index)
+    if (!limits) {
+      showToast("Sections can't be shorter than 4 seconds.")
+      return
+    }
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // The drag still follows pointermove and pointerup when capture is unavailable.
+    }
+    resizeDrag.current = {
+      id: event.pointerId,
+      index,
+      origin: studioRef.current,
+      sections: list,
+      limits,
+      done: false,
+    }
+    setHotBoundary(index)
+  }
+
+  function onBoundaryMove(event) {
+    const drag = resizeDrag.current
+    if (!drag || drag.done || event.pointerId !== drag.id || !track?.duration) return
+    const rect = waveRef.current?.getBoundingClientRect()
+    if (!rect?.width) return
+    const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+    const snapped = snapBoundary(ratio * track.duration, track.bpm, drag.limits.min, drag.limits.max)
+    if (snapped == null) return
+    const before = drag.sections[drag.index]
+    if (Math.abs(snapped - before.start) < 0.0005) {
+      syncStudio(() => drag.origin)
+      return
+    }
+    const next = withBoundary(drag.sections, drag.index, snapped)
+    syncStudio(() => ({
+      ...drag.origin,
+      sections: next,
+      edits: moveKey(drag.origin.edits, sectionKey(before), sectionKey(next[drag.index])),
+      seeds: moveKey(drag.origin.seeds, sectionKey(before), sectionKey(next[drag.index])),
+    }))
+  }
+
+  splitRef.current = splitHere
+  undoRef.current = undoStudio
 
   return (
     <main className="studio">
@@ -803,25 +1098,90 @@ export function Studio() {
                 <div className="playhead" ref={playheadRef} />
               </div>
               <div className="section-row">
-                {track.sections.map((item) => {
-                  const selected = section?.start === item.start
+                {sections.map((item, index) => {
+                  const key = sectionKey(item)
+                  const selected = section?.label === item.label && Math.abs((section?.start ?? -1) - item.start) < 0.0005
+                  const naming = renaming?.key === key
                   return (
-                    <button
-                      key={sectionKey(item)}
-                      type="button"
-                      className={selected ? 'section-chip selected' : 'section-chip'}
-                      style={{ flex: Math.max(0.08, item.end - item.start) }}
-                      aria-pressed={selected}
-                      onClick={() => {
-                        setSection(item)
-                        if (audioRef.current) audioRef.current.currentTime = item.start
-                      }}
-                    >
-                      {item.label}
-                    </button>
+                    <div key={key} className="section-chip-wrap" style={{ flex: Math.max(0.08, item.end - item.start) }}>
+                      {index > 0 ? (
+                        <button
+                          type="button"
+                          className={hotBoundary === index ? 'section-boundary is-hot' : 'section-boundary'}
+                          aria-label={`Resize between ${sections[index - 1].label} and ${item.label}`}
+                          onPointerDown={(event) => onBoundaryDown(event, index)}
+                          onPointerMove={onBoundaryMove}
+                          onPointerUp={finishBoundary}
+                          onLostPointerCapture={finishBoundary}
+                        />
+                      ) : null}
+                      {naming ? (
+                        <input
+                          className="section-chip section-name"
+                          value={renaming.value}
+                          maxLength={16}
+                          aria-label="Section name"
+                          autoFocus
+                          onFocus={(event) => event.target.select()}
+                          onChange={(event) => setRenaming((current) => (current ? { ...current, value: event.target.value.slice(0, 16) } : current))}
+                          onKeyDown={(event) => {
+                            event.stopPropagation()
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              saveRename()
+                            } else if (event.key === 'Escape') {
+                              event.preventDefault()
+                              renameCommit.current = true
+                              setRenaming(null)
+                            }
+                          }}
+                          onBlur={() => {
+                            if (renameCommit.current) {
+                              renameCommit.current = false
+                              return
+                            }
+                            setRenaming(null)
+                          }}
+                          onPointerDown={(event) => event.stopPropagation()}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className={selected ? 'section-chip selected' : 'section-chip'}
+                          aria-pressed={selected}
+                          onClick={() => {
+                            setSection(item)
+                            if (audioRef.current) audioRef.current.currentTime = item.start
+                          }}
+                          onDoubleClick={(event) => {
+                            event.preventDefault()
+                            setRenaming({ key, value: item.label.slice(0, 16) })
+                          }}
+                          onContextMenu={(event) => {
+                            event.preventDefault()
+                            setSection(item)
+                            mergeSection(index)
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      )}
+                    </div>
                   )
                 })}
               </div>
+              <div className="section-actions">
+                <button type="button" className="button-redo" onClick={splitHere}>Split here</button>
+                <button type="button" className="button-redo" disabled={!canMerge} onClick={() => mergeSection(sectionIndex)}>Merge with next</button>
+                <button type="button" className="button-redo" onClick={askReset}>Reset sections</button>
+              </div>
+              {resetAsk ? (
+                <div className="section-confirm" role="group" aria-label="Reset sections">
+                  <p>Reset to the detected sections?</p>
+                  <button type="button" className="button" onClick={confirmReset}>Reset</button>
+                  <button type="button" className="button-redo" onClick={() => setResetAsk(false)}>Cancel</button>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -862,13 +1222,12 @@ export function Studio() {
                 <option value="mirror">Mirror</option>
                 <option value="quad">Quad</option>
                 <option value="radial">Radial</option>
-                <option value="grid">Grid</option>
               </select>
             </label>
             <button
               type="button"
               className={compositionApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
-              disabled={!section || !track?.sections?.length}
+              disabled={!section || !sections.length}
               onClick={applyComposition}
             >
               {compositionApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
@@ -886,7 +1245,21 @@ export function Studio() {
                     aria-label={choice.label}
                     aria-selected={selected}
                     disabled={!section}
-                    onClick={() => onSectionBackground(choice.hex)}
+                    onClick={(event) => {
+                      const changed = choice.hex.toLowerCase() !== sectionBackground.toLowerCase()
+                      if (changed) {
+                        setBackgroundAck(null)
+                        writeSection({ background: choice.hex })
+                      }
+                      openPicker(event, {
+                        mode: 'edit',
+                        target: 'background',
+                        hex: choice.hex,
+                        previous: choice.hex,
+                        custom: Boolean(choice.custom),
+                        ...(changed ? { revert: isHex(sectionEdit.background) ? sectionEdit.background : null } : {}),
+                      })
+                    }}
                   />
                 )
               })}
@@ -895,24 +1268,15 @@ export function Studio() {
                 className="add-swatch"
                 aria-label="Add a background color"
                 disabled={!section || backgroundChoices.length >= MAX_BACKGROUNDS}
-                onClick={() => backgroundPicker.current?.click()}
+                onClick={(event) => openPicker(event, { mode: 'add', target: 'background', hex: '#d25a3a' })}
               >
                 +
               </button>
-              <input
-                ref={backgroundPicker}
-                className="color-pop"
-                type="color"
-                value={sectionBackground}
-                tabIndex={-1}
-                aria-hidden="true"
-                onChange={onBackgroundPicked}
-              />
             </div>
             <button
               type="button"
               className={backgroundApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
-              disabled={!section || !track?.sections?.length}
+              disabled={!section || !sections.length}
               onClick={applyBackground}
             >
               {backgroundApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
@@ -922,20 +1286,17 @@ export function Studio() {
 
         <p className="side-label">Palette</p>
         <div className="swatches">
-          {studio.palette.swatches.map((swatch, index) => {
+          {activePalette.swatches.map((swatch, index) => {
             const hex = swatchHex(swatch)
             return (
               <div className="swatch-item" key={swatch.id}>
-                <label className="swatch" style={{ background: hex }}>
-                  <input
-                    type="color"
-                    value={hex}
-                    aria-label={`Color ${index + 1}`}
-                    onFocus={startSlide}
-                    onBlur={finishSlide}
-                    onChange={(event) => onPick(swatch.id, event.target.value)}
-                  />
-                </label>
+                <button
+                  type="button"
+                  className="swatch"
+                  style={{ background: hex }}
+                  aria-label={`Color ${index + 1}`}
+                  onClick={(event) => openPicker(event, { mode: 'edit', target: 'palette', id: swatch.id, hex })}
+                />
               </div>
             )
           })}
@@ -943,8 +1304,8 @@ export function Studio() {
             type="button"
             className="add-swatch"
             aria-label="Add a color"
-            disabled={studio.palette.swatches.length >= MAX_SWATCHES}
-            onClick={onAddColor}
+            disabled={activePalette.swatches.length >= MAX_SWATCHES}
+            onClick={(event) => openPicker(event, { mode: 'add', target: 'palette', hex: suggestHex(activePalette) })}
           >
             +
           </button>
@@ -1034,7 +1395,6 @@ export function Studio() {
 
         {section && shapesOn ? (
           <div className="section-tools">
-            <p className="side-label">This section</p>
             <div className="slider-labels">
               <span>Shape size</span>
             </div>
@@ -1249,6 +1609,35 @@ export function Studio() {
             />
           </label>
         </aside>
+      ) : null}
+      {picker ? (
+        <form
+          className="color-picker"
+          ref={pickerRef}
+          style={{ left: picker.left, top: picker.top }}
+          onSubmit={commitPicker}
+        >
+          <input
+            type="color"
+            value={isHex(picker.hex) ? picker.hex : '#000000'}
+            aria-label="Pick a color"
+            onChange={(event) => setPicker((current) => (current ? { ...current, hex: event.target.value } : current))}
+          />
+          <input
+            className="color-hex"
+            value={picker.hex}
+            spellCheck={false}
+            aria-label="Hex color"
+            onChange={(event) => {
+              const raw = event.target.value.trim()
+              const hex = raw.startsWith('#') ? raw : `#${raw}`
+              setPicker((current) => (current ? { ...current, hex } : current))
+            }}
+          />
+          <button type="submit" className="button" disabled={!isHex(picker.hex)}>
+            {picker.mode === 'add' ? 'Add' : 'Save'}
+          </button>
+        </form>
       ) : null}
     </main>
   )
