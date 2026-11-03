@@ -1,5 +1,6 @@
 import { paletteColors, swatchHex } from './palette.js'
 import { frameMode, paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
+import { paintHalftone } from './halftoneField.js'
 import { paintGrid } from './gridField.js'
 import { metricsAt } from './profileTrack.js'
 import { workingSections } from './sectionEdit.js'
@@ -51,9 +52,10 @@ export function paintFrame(ctx, spec) {
   ctx.save()
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
-  if (frameMode(spec) === 'grid') paintGrid(ctx, spec)
+  if (spec.style === 'image') paintHalftone(ctx, spec)
+  else if (frameMode(spec) === 'grid') paintGrid(ctx, spec)
   else paintMetaballs(ctx, spec)
-  paintGrain(ctx, width, height)
+  if (spec.style !== 'image') paintGrain(ctx, width, height)
   ctx.restore()
 }
 
@@ -84,6 +86,9 @@ export function frameInput({ track, studio, profile, time, width, height }) {
     background: backgroundAt({ background: studio.background, edits: studio.edits || {}, sections }, time),
     shine: studio.shine !== false,
     speed: edit?.speed ?? studio.speed ?? 50,
+    style: studio.style || 'shapes',
+    images: (studio.images || []).map((image) => image.url).filter(Boolean),
+    imageSwitch: studio.imageSwitch || 'section',
     sectionLabel: section?.label || '',
     loud: metrics.loud,
     bass: metrics.bass,

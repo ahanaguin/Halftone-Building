@@ -3,6 +3,7 @@ import coreURL from '@ffmpeg/core?url'
 import wasmURL from '@ffmpeg/core/wasm?url'
 import { zipSync } from 'fflate'
 import { frameInput, paintScaled } from './drawFrame.js'
+import { prepareHalftone } from './halftoneField.js'
 import { FILM_FPS, LOGICAL, LOOP_FPS, OUTPUT, filmFrames, loopFrames } from './exportPlan.js'
 
 export class ExportCancelled extends Error {
@@ -158,6 +159,7 @@ async function encodeFrames({ frames, width, height, logical, fps, input, audioF
 
 export async function renderCover({ track, studio, profile, time, signal }) {
   throwIfCancelled(signal)
+  await prepareHalftone({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['1:1'].width, height: LOGICAL['1:1'].height })
   const canvas = document.createElement('canvas')
   canvas.width = OUTPUT.cover.width
   canvas.height = OUTPUT.cover.height
@@ -166,6 +168,7 @@ export async function renderCover({ track, studio, profile, time, signal }) {
 }
 
 export async function renderLoop({ track, studio, profile, start, length, signal, onFrame }) {
+  await prepareHalftone({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['9:16'].width, height: LOGICAL['9:16'].height })
   const frames = loopFrames(start, length, LOOP_FPS)
   return encodeFrames({
     frames,
@@ -180,6 +183,7 @@ export async function renderLoop({ track, studio, profile, start, length, signal
 }
 
 export async function renderFilm({ track, studio, profile, signal, onFrame }) {
+  await prepareHalftone({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['16:9'].width, height: LOGICAL['16:9'].height })
   return encodeFrames({
     frames: filmFrames(track.duration, FILM_FPS),
     width: OUTPUT.film.width,

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import {
   MAX_SWATCHES,
@@ -25,6 +26,7 @@ import {
   withBoundary,
   workingSections,
 } from './sectionEdit.js'
+import { DOT_DENSITY, DOT_SIZE_DEFAULT } from './halftoneField.js'
 import { INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
@@ -64,7 +66,7 @@ const STYLES = [
   { id: 'bars', label: 'Bars', ready: false },
   { id: 'wave', label: 'Wave', ready: false },
   { id: 'poster', label: 'Poster', ready: false },
-  { id: 'image', label: 'Animate your image', ready: false },
+  { id: 'image', label: 'Image animation', ready: true },
 ]
 
 function fitCanvas(format, boxWidth, boxHeight) {
@@ -97,10 +99,42 @@ function PauseIcon() {
   )
 }
 
+function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M2.75 6.25V2.75H6.25M9.75 2.75h3.5v3.5M13.25 9.75v3.5h-3.5M6.25 13.25H2.75v-3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M3.5 3.5l9 9M12.5 3.5l-9 9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 export function Studio() {
   const { track, studio, editStudio, syncStudio, commitStudio, undoStudio } = useTrack()
   const [format, setFormat] = useState('16:9')
   const [section, setSection] = useState(null)
+  const [picked, setPicked] = useState(null)
+  const [expanded, setExpanded] = useState(false)
+  const [parked, setParked] = useState(null)
   const [playing, setPlaying] = useState(false)
   const [poster, setPoster] = useState('eclipse')
   const posterRef = useRef('eclipse')
@@ -118,10 +152,15 @@ export function Studio() {
   const pickerRef = useRef(null)
   const toastTimer = useRef(null)
   const slotRef = useRef(null)
+  const mainRef = useRef(null)
   const sideRef = useRef(null)
+  const closeCanvasRef = useRef(null)
+  const expandedRef = useRef(false)
   const holderRef = useRef(null)
   const audioRef = useRef(null)
   const waveRef = useRef(null)
+  const rowRef = useRef(null)
+  const imageInputRef = useRef(null)
   const playheadRef = useRef(null)
   const graphRef = useRef(null)
   const profileRef = useRef(track?.profile ?? null)
@@ -154,10 +193,14 @@ export function Studio() {
     background: backgroundAt({ background: studio.background, edits: studio.edits || {}, sections: track?.sections || [] }, audioRef.current?.currentTime || section?.start || 0),
     shine: studio.shine !== false,
     speed: studio.speed ?? 50,
+    style: studio.style,
+    images: (studio.images || []).map((image) => image.url),
+    imageSwitch: studio.imageSwitch || 'section',
   })
 
   studioRef.current = studio
   sizeRef.current = size
+  expandedRef.current = expanded
   if (track?.profile?.timeline) profileRef.current = track.profile
   const sections = workingSections(track, studio)
 
@@ -183,6 +226,9 @@ export function Studio() {
     shine: studio.shine !== false,
     speed: activeEdit.speed ?? studio.speed ?? 50,
     print: activeEdit.print !== false,
+    style: studio.style,
+    images: (studio.images || []).map((image) => image.url),
+    imageSwitch: studio.imageSwitch || 'section',
   }
 
   useEffect(() => {
@@ -210,6 +256,7 @@ export function Studio() {
       }
     }
     setSection(list[0] ?? null)
+    setPicked(null)
     setRenaming(null)
     setResetAsk(false)
     return () => URL.revokeObjectURL(url)
@@ -260,8 +307,49 @@ export function Studio() {
   useEffect(() => {
     const slot = slotRef.current
     const side = sideRef.current
-    if (!slot || !side) return undefined
+    const main = mainRef.current
+    if (!slot || !side || !main) return undefined
     const measure = () => {
+      if (expandedRef.current) {
+        const next = fitCanvas(format, window.innerWidth - 64, window.innerHeight - 64)
+        sizeRef.current = next
+        setSize((current) =>
+          current.w === next.w && current.h === next.h && current.frame === next.frame ? current : next,
+        )
+        return
+      }
+      let chrome = 0
+      for (const child of main.children) {
+        if (child === slot || child.tagName === 'AUDIO') continue
+        const style = getComputedStyle(child)
+        const margin = parseFloat(style.marginTop) + parseFloat(style.marginBottom)
+        if (child.classList.contains('scrubber')) {
+          const play = child.querySelector('.scrub-play')
+          const playHeight = play ? play.offsetHeight + parseFloat(getComputedStyle(play).marginTop) : 0
+          const wave = child.querySelector('.scrub-wave')?.offsetHeight || 0
+          const row = child.querySelector('.section-row')?.offsetHeight || 0
+          chrome += margin + Math.max(playHeight, wave + 8 + row)
+          continue
+        }
+        chrome += child.offsetHeight + margin
+      }
+      const slotStyle = getComputedStyle(slot)
+      chrome += parseFloat(slotStyle.marginTop) + parseFloat(slotStyle.marginBottom)
+      const studioBox = main.parentElement
+      const studioStyle = studioBox ? getComputedStyle(studioBox) : null
+      const pad = studioStyle ? parseFloat(studioStyle.paddingTop) + parseFloat(studioStyle.paddingBottom) : 0
+      const topbar = document.querySelector('.topbar')?.offsetHeight || 0
+      const available = window.innerHeight - topbar - pad
+      const target = Math.max(180, Math.round(available - chrome))
+      if (slot.style.minHeight !== `${target}px`) slot.style.minHeight = `${target}px`
+      const row = rowRef.current
+      if (row) {
+        const wraps = row.querySelectorAll(':scope > .section-chip-wrap')
+        row.querySelectorAll(':scope > .section-boundary').forEach((handle) => {
+          const wrap = wraps[Number(handle.dataset.index)]
+          if (wrap) handle.style.left = `${wrap.offsetLeft}px`
+        })
+      }
       const boxWidth = slot.clientWidth
       const boxHeight = slot.clientHeight
       if (boxWidth < 40 || boxHeight < 40) return
@@ -275,13 +363,30 @@ export function Studio() {
     const observer = new ResizeObserver(measure)
     observer.observe(slot)
     observer.observe(side)
-    return () => observer.disconnect()
-  }, [format, studio.style, studio.palette.swatches.length])
+    observer.observe(main)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [format, studio.style, studio.palette.swatches.length, expanded, track])
+
+  useEffect(() => () => resizeDrag.current?.cleanup?.(), [])
+
+  useLayoutEffect(() => {
+    const row = rowRef.current
+    if (!row) return
+    const wraps = row.querySelectorAll(':scope > .section-chip-wrap')
+    row.querySelectorAll(':scope > .section-boundary').forEach((handle) => {
+      const wrap = wraps[Number(handle.dataset.index)]
+      if (wrap) handle.style.left = `${wrap.offsetLeft}px`
+    })
+  })
 
   useEffect(() => {
-    if (!holderRef.current || !track || studio.style !== 'shapes') return undefined
+    if (!holderRef.current || !track || (studio.style !== 'shapes' && studio.style !== 'image')) return undefined
     return mountShapes(holderRef.current, liveRef, sizeRef)
-  }, [track, studio.style])
+  }, [track, studio.style, expanded])
 
   useEffect(() => {
     let frame = 0
@@ -321,6 +426,9 @@ export function Studio() {
         live.shine = studioNow.shine !== false
         live.speed = playingEdit.speed ?? studioNow.speed ?? 50
         live.print = playingEdit.print !== false
+        live.style = studioNow.style
+        live.images = (studioNow.images || []).map((image) => image.url)
+        live.imageSwitch = studioNow.imageSwitch || 'section'
         const shown = pickRecipe(live.seed, live.sectionLabel || 'Quiet', live.roundness ?? 0.7)
         if (shown !== posterRef.current) {
           posterRef.current = shown
@@ -399,6 +507,11 @@ export function Studio() {
         if (typing) return
         event.preventDefault()
         undoRef.current?.()
+        return
+      }
+      if (event.key === 'Escape' && !typing && expandedRef.current) {
+        event.preventDefault()
+        closeCanvasRef.current?.()
         return
       }
       if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
@@ -585,6 +698,7 @@ export function Studio() {
   }
 
   function modeOf(edit) {
+    if (studio.style === 'image') return 'halftone'
     return ['free', 'mirror', 'quad', 'radial'].includes(edit?.composition) ? edit.composition : 'auto'
   }
 
@@ -603,7 +717,7 @@ export function Studio() {
       }
       return changed ? { ...current, edits } : current
     })
-    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial' }[mode]
+    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', halftone: 'Halftone' }[mode]
     setCompositionAck(mode)
     showToast(`${name} applied to all sections.`)
   }
@@ -625,6 +739,31 @@ export function Studio() {
     })
     setBackgroundAck(hex.toLowerCase())
     showToast('Background applied to all sections.')
+  }
+
+  function onImages(event) {
+    const files = [...(event.target.files || [])]
+    event.target.value = ''
+    if (!files.length) return
+    editStudio((current) => {
+      const images = current.images || []
+      const added = files.slice(0, Math.max(0, 5 - images.length)).map((file) => ({
+        id: crypto.randomUUID(),
+        name: file.name,
+        url: URL.createObjectURL(file),
+      }))
+      if (!added.length) return current
+      return { ...current, images: [...images, ...added] }
+    })
+  }
+
+  function removeImage(id) {
+    editStudio((current) => ({ ...current, images: (current.images || []).filter((image) => image.id !== id) }))
+  }
+
+  function onImageSwitch(event) {
+    const imageSwitch = event.target.value
+    editStudio((current) => (current.imageSwitch === imageSwitch ? current : { ...current, imageSwitch }))
   }
 
   function onShine() {
@@ -820,11 +959,29 @@ export function Studio() {
   const lightness = Math.round((activePalette.lightness ?? 0.5) * 100)
   const spiky = Math.round((1 - (activeEdit.roundness ?? studio.roundness ?? 0.7)) * 100)
   const shapesOn = studio.style === 'shapes'
+  const imageOn = studio.style === 'image'
+  const visualOn = shapesOn || imageOn
   const sectionEdit = studio.edits?.[activeKey] || {}
-  const composition = ['free', 'mirror', 'quad', 'radial'].includes(sectionEdit.composition) ? sectionEdit.composition : 'auto'
+  const composition = imageOn
+    ? 'halftone'
+    : ['free', 'mirror', 'quad', 'radial'].includes(sectionEdit.composition)
+      ? sectionEdit.composition
+      : 'auto'
+  const compositionOptions = imageOn
+    ? [{ id: 'halftone', label: 'Halftone' }]
+    : [
+        { id: 'auto', label: 'Auto' },
+        { id: 'free', label: 'Free' },
+        { id: 'mirror', label: 'Mirror' },
+        { id: 'quad', label: 'Quad' },
+        { id: 'radial', label: 'Radial' },
+      ]
   const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
-  const sizeValue = sectionEdit.size ?? 50
-  const countValue = Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
+  const sizeValue = sectionEdit.size ?? (imageOn ? DOT_SIZE_DEFAULT : 50)
+  const countValue = imageOn
+    ? Math.min(DOT_DENSITY.max, Math.max(DOT_DENSITY.min, sectionEdit.count ?? DOT_DENSITY.count))
+    : Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
+  const images = studio.images || []
   const enabledColors =
     sectionEdit.colors?.length >= 2
       ? activePalette.swatches.filter((swatch) => sectionEdit.colors.includes(swatch.id)).map((swatch) => swatch.id)
@@ -854,8 +1011,19 @@ export function Studio() {
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
   const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
   const backgroundChoices = backgroundChoicesOf(studio, activePalette)
-  const sectionIndex = sections.findIndex((item) => section && item.label === section.label && Math.abs(item.start - section.start) < 0.0005)
-  const canMerge = sectionIndex >= 0 && sectionIndex < sections.length - 1
+  const sectionIndex = sections.findIndex((item) => sameSection(section, item))
+  const pickedIndex = sections.findIndex((item) => sameSection(picked, item))
+  const canMerge = sectionIndex >= 0 && pickedIndex >= 0 && sectionIndex !== pickedIndex
+
+  function sameSection(left, right) {
+    return Boolean(
+      left &&
+        right &&
+        left.label === right.label &&
+        Math.abs(left.start - right.start) < 0.0005 &&
+        Math.abs(left.end - right.end) < 0.0005,
+    )
+  }
 
   function cloneList(list) {
     return list.map((item) => ({ start: item.start, end: item.end, label: item.label }))
@@ -884,6 +1052,7 @@ export function Studio() {
       seeds: { ...(current.seeds || {}), [rightKey]: freshSeed(created, result.index + 1) },
     }))
     setSection(created)
+    setPicked(null)
     setRenaming(null)
     setResetAsk(false)
   }
@@ -904,8 +1073,25 @@ export function Studio() {
       seeds: dropKey(current.seeds, rightKey),
     }))
     setSection(cloned[index])
+    setPicked(null)
     setRenaming(null)
     setResetAsk(false)
+  }
+
+  function mergePicked() {
+    const list = workingSections(track, studioRef.current)
+    const first = list.findIndex((item) => sameSection(section, item))
+    const second = list.findIndex((item) => sameSection(picked, item))
+    if (first < 0 || second < 0 || first === second) {
+      showToast('Hold Shift and select two sections.')
+      return
+    }
+    const left = Math.min(first, second)
+    if (Math.abs(first - second) !== 1) {
+      showToast('Select two sections next to each other.')
+      return
+    }
+    mergeSection(left)
   }
 
   function saveRename() {
@@ -928,7 +1114,27 @@ export function Studio() {
       seeds: moveKey(studioNow.seeds, from, to),
     }))
     setSection(after)
+    setPicked(null)
   }
+
+  function openCanvas() {
+    const next = fitCanvas(format, window.innerWidth - 64, window.innerHeight - 64)
+    setParked({ w: size.w, h: size.h })
+    sizeRef.current = next
+    setSize(next)
+    setExpanded(true)
+  }
+
+  function closeCanvas() {
+    setExpanded(false)
+    const slot = slotRef.current
+    if (!slot) return
+    const next = fitCanvas(format, slot.clientWidth, slot.clientHeight)
+    sizeRef.current = next
+    setSize(next)
+  }
+
+  closeCanvasRef.current = closeCanvas
 
   function askReset() {
     const list = workingSections(track, studioRef.current)
@@ -944,6 +1150,7 @@ export function Studio() {
     const original = cloneList(track?.sections || [])
     setResetAsk(false)
     setRenaming(null)
+    setPicked(null)
     editStudio((current) => ({ ...current, sections: original }))
     setSection(original[0] || null)
     showToast('Sections reset.')
@@ -953,34 +1160,18 @@ export function Studio() {
     const drag = resizeDrag.current
     if (!drag || drag.done || event.pointerId !== drag.id) return
     drag.done = true
+    drag.cleanup?.()
     resizeDrag.current = null
     setHotBoundary(null)
+    if (drag.moved) {
+      const swallow = (click) => {
+        click.preventDefault()
+        click.stopPropagation()
+        window.removeEventListener('click', swallow, true)
+      }
+      window.addEventListener('click', swallow, true)
+    }
     commitStudio(drag.origin)
-  }
-
-  function onBoundaryDown(event, index) {
-    event.preventDefault()
-    event.stopPropagation()
-    const list = cloneList(workingSections(track, studioRef.current))
-    const limits = boundaryLimits(list, index)
-    if (!limits) {
-      showToast("Sections can't be shorter than 4 seconds.")
-      return
-    }
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId)
-    } catch {
-      // The drag still follows pointermove and pointerup when capture is unavailable.
-    }
-    resizeDrag.current = {
-      id: event.pointerId,
-      index,
-      origin: studioRef.current,
-      sections: list,
-      limits,
-      done: false,
-    }
-    setHotBoundary(index)
   }
 
   function onBoundaryMove(event) {
@@ -991,6 +1182,7 @@ export function Studio() {
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
     const snapped = snapBoundary(ratio * track.duration, track.bpm, drag.limits.min, drag.limits.max)
     if (snapped == null) return
+    drag.moved = true
     const before = drag.sections[drag.index]
     if (Math.abs(snapped - before.start) < 0.0005) {
       syncStudio(() => drag.origin)
@@ -1005,12 +1197,50 @@ export function Studio() {
     }))
   }
 
+  function onBoundaryDown(event, index) {
+    event.preventDefault()
+    event.stopPropagation()
+    const list = cloneList(workingSections(track, studioRef.current))
+    const limits = boundaryLimits(list, index)
+    if (!limits) {
+      showToast("Sections can't be shorter than 4 seconds.")
+      return
+    }
+    resizeDrag.current?.cleanup?.()
+    const drag = {
+      id: event.pointerId,
+      index,
+      origin: studioRef.current,
+      sections: list,
+      limits,
+      done: false,
+      moved: false,
+      cleanup: null,
+    }
+    const move = (pointer) => onBoundaryMove(pointer)
+    const up = (pointer) => {
+      if (pointer.pointerId !== drag.id) return
+      drag.cleanup?.()
+      finishBoundary(pointer)
+    }
+    drag.cleanup = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+    resizeDrag.current = drag
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    setHotBoundary(index)
+  }
+
   splitRef.current = splitHere
   undoRef.current = undoStudio
 
   return (
     <main className="studio">
-      <section className="studio-main">
+      <section className="studio-main" ref={mainRef}>
         <div className="formats" role="group" aria-label="Format">
           {FORMATS.map((item) => (
             <button
@@ -1027,18 +1257,21 @@ export function Studio() {
 
         <div className="canvas-slot" ref={slotRef}>
           <div className="canvas-frame">
-            <div
-              ref={holderRef}
-              className={track && shapesOn ? 'canvas-stage can-place' : 'canvas-stage'}
-              style={{ width: size.w, height: size.h, background: shapesOn ? background : artwork }}
-              onPointerDown={track && shapesOn ? onPlaceDown : undefined}
-              onPointerMove={onPlaceMove}
-              onPointerUp={onPlaceUp}
-              onPointerCancel={onPlaceUp}
-              role={track && shapesOn ? 'img' : undefined}
-              aria-label={track && shapesOn ? 'Liquid reacting to the track' : undefined}
-            />
-            {track && shapesOn ? null : (
+            {expanded ? <div className="canvas-spacer" style={{ width: parked?.w || size.w, height: parked?.h || size.h }} /> : null}
+            {expanded ? null : (
+              <div
+                ref={holderRef}
+                className={track && shapesOn ? 'canvas-stage can-place' : 'canvas-stage'}
+                style={{ width: size.w, height: size.h, background: visualOn ? background : artwork }}
+                onPointerDown={track && shapesOn ? onPlaceDown : undefined}
+                onPointerMove={onPlaceMove}
+                onPointerUp={onPlaceUp}
+                onPointerCancel={onPlaceUp}
+                role={track && visualOn ? 'img' : undefined}
+                aria-label={track && imageOn ? 'Halftone of the image' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+              />
+            )}
+            {track && visualOn ? null : (
               <div className="canvas-empty">
                 {track ? (
                   <p>Coming soon</p>
@@ -1052,12 +1285,19 @@ export function Studio() {
                 )}
               </div>
             )}
+            <button type="button" className="canvas-expand" aria-label="Expand" onClick={openCanvas}>
+              <ExpandIcon />
+            </button>
           </div>
         </div>
 
         <div className="why">
           <strong>Why it looks like this</strong>
-          <p>{explainPoster(poster)}</p>
+          <p>
+            {imageOn
+              ? 'Dots follow the photo. Dark areas grow larger, and soft zones drift across to reveal it. Bass makes them swell and fuse, and a beat sends a ripple through the grid.'
+              : explainPoster(poster)}
+          </p>
         </div>
 
         {track ? (
@@ -1097,24 +1337,13 @@ export function Studio() {
                 </div>
                 <div className="playhead" ref={playheadRef} />
               </div>
-              <div className="section-row">
+              <div className="section-row" ref={rowRef}>
                 {sections.map((item, index) => {
                   const key = sectionKey(item)
-                  const selected = section?.label === item.label && Math.abs((section?.start ?? -1) - item.start) < 0.0005
+                  const selected = sameSection(section, item) || sameSection(picked, item)
                   const naming = renaming?.key === key
                   return (
-                    <div key={key} className="section-chip-wrap" style={{ flex: Math.max(0.08, item.end - item.start) }}>
-                      {index > 0 ? (
-                        <button
-                          type="button"
-                          className={hotBoundary === index ? 'section-boundary is-hot' : 'section-boundary'}
-                          aria-label={`Resize between ${sections[index - 1].label} and ${item.label}`}
-                          onPointerDown={(event) => onBoundaryDown(event, index)}
-                          onPointerMove={onBoundaryMove}
-                          onPointerUp={finishBoundary}
-                          onLostPointerCapture={finishBoundary}
-                        />
-                      ) : null}
+                    <div key={`${index}:${item.label}`} className={selected ? 'section-chip-wrap is-selected' : 'section-chip-wrap'} style={{ flex: Math.max(0.08, item.end - item.start) }}>
                       {naming ? (
                         <input
                           className="section-chip section-name"
@@ -1149,17 +1378,24 @@ export function Studio() {
                           type="button"
                           className={selected ? 'section-chip selected' : 'section-chip'}
                           aria-pressed={selected}
-                          onClick={() => {
+                          onClick={(event) => {
+                            if (event.shiftKey) {
+                              setPicked((current) => (sameSection(current, item) || sameSection(section, item) ? null : item))
+                              return
+                            }
+                            setPicked(null)
                             setSection(item)
                             if (audioRef.current) audioRef.current.currentTime = item.start
                           }}
                           onDoubleClick={(event) => {
+                            if (event.shiftKey) return
                             event.preventDefault()
                             setRenaming({ key, value: item.label.slice(0, 16) })
                           }}
                           onContextMenu={(event) => {
                             event.preventDefault()
                             setSection(item)
+                            setPicked(null)
                             mergeSection(index)
                           }}
                         >
@@ -1169,10 +1405,22 @@ export function Studio() {
                     </div>
                   )
                 })}
+                {sections.map((item, index) => (
+                  index > 0 ? (
+                    <button
+                      key={`edge-${index}`}
+                      type="button"
+                      data-index={index}
+                      className={hotBoundary === index ? 'section-boundary is-hot' : 'section-boundary'}
+                      aria-label={`Resize between ${sections[index - 1].label} and ${item.label}`}
+                      onPointerDown={(event) => onBoundaryDown(event, index)}
+                    />
+                  ) : null
+                ))}
               </div>
               <div className="section-actions">
                 <button type="button" className="button-redo" onClick={splitHere}>Split here</button>
-                <button type="button" className="button-redo" disabled={!canMerge} onClick={() => mergeSection(sectionIndex)}>Merge with next</button>
+                <button type="button" className="button-redo" disabled={!canMerge} onClick={mergePicked}>Merge</button>
                 <button type="button" className="button-redo" onClick={askReset}>Reset sections</button>
               </div>
               {resetAsk ? (
@@ -1206,7 +1454,47 @@ export function Studio() {
           </select>
         </label>
 
-        {shapesOn ? (
+        {imageOn ? (
+          <>
+            <div className="image-head">
+              <p className="side-label">Images</p>
+              <span className="image-count">{images.length} of 5</span>
+            </div>
+            <div className="image-grid">
+              {images.map((image) => (
+                <div className="image-slot" key={image.id}>
+                  <img src={image.url} alt={image.name || 'Uploaded image'} />
+                  <button type="button" className="image-remove" aria-label={`Remove ${image.name || 'image'}`} onClick={() => removeImage(image.id)}>
+                    ×
+                  </button>
+                </div>
+              ))}
+              {images.length < 5 ? (
+                <button type="button" className="image-slot is-add" aria-label="Add an image" onClick={() => imageInputRef.current?.click()}>
+                  +
+                </button>
+              ) : null}
+            </div>
+            <input
+              ref={imageInputRef}
+              className="image-file"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              onChange={onImages}
+            />
+            {images.length ? null : <p className="section-note">Add a photo. Dark areas become larger dots.</p>}
+            <p className="side-label">Switch images on</p>
+            <label className="style-field">
+              <select className="style-select" aria-label="Switch images on" value={studio.imageSwitch || 'section'} onChange={onImageSwitch}>
+                <option value="section">Section</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+          </>
+        ) : null}
+
+        {visualOn ? (
           <>
             <p className="side-label">Composition</p>
             <label className="style-field">
@@ -1217,11 +1505,11 @@ export function Studio() {
                 disabled={!section}
                 onChange={onComposition}
               >
-                <option value="auto">Auto</option>
-                <option value="free">Free</option>
-                <option value="mirror">Mirror</option>
-                <option value="quad">Quad</option>
-                <option value="radial">Radial</option>
+                {compositionOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
             <button
@@ -1345,22 +1633,26 @@ export function Studio() {
           aria-label="Dark to light"
         />
 
-        <div className="slider-labels">
-          <span>Round</span>
-          <span>Spiky</span>
-        </div>
-        <input
-          className="range"
-          type="range"
-          min="0"
-          max="100"
-          value={spiky}
-          onPointerDown={startSlide}
-          onPointerUp={finishSlide}
-          onPointerCancel={finishSlide}
-          onChange={onRoundness}
-          aria-label="Round to spiky"
-        />
+        {shapesOn ? (
+          <>
+            <div className="slider-labels">
+              <span>Round</span>
+              <span>Spiky</span>
+            </div>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="100"
+              value={spiky}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={onRoundness}
+              aria-label="Round to spiky"
+            />
+          </>
+        ) : null}
 
         <div className="slider-labels">
           <span>Slow</span>
@@ -1379,6 +1671,7 @@ export function Studio() {
           aria-label="Animation speed"
         />
 
+        {shapesOn ? (
         <div className="background-row">
           <p className="side-label">Drop shine</p>
           <button
@@ -1392,11 +1685,12 @@ export function Studio() {
             <span />
           </button>
         </div>
+        ) : null}
 
-        {section && shapesOn ? (
+        {section && visualOn ? (
           <div className="section-tools">
             <div className="slider-labels">
-              <span>Shape size</span>
+              <span>{imageOn ? 'Max dot size' : 'Shape size'}</span>
             </div>
             <input
               className="range"
@@ -1408,44 +1702,48 @@ export function Studio() {
               onPointerUp={finishSlide}
               onPointerCancel={finishSlide}
               onChange={onSectionSize}
-              aria-label="Shape size"
+              aria-label={imageOn ? 'Max dot size' : 'Shape size'}
             />
             <div className="slider-labels">
-              <span>Number of shapes</span>
+              <span>{imageOn ? 'Dot density' : 'Number of shapes'}</span>
               <span>{countValue}</span>
             </div>
             <input
               className="range"
               type="range"
-              min={shapeRange.min}
-              max={shapeRange.max}
+              min={imageOn ? DOT_DENSITY.min : shapeRange.min}
+              max={imageOn ? DOT_DENSITY.max : shapeRange.max}
               step="1"
               value={countValue}
               onPointerDown={startSlide}
               onPointerUp={finishSlide}
               onPointerCancel={finishSlide}
               onChange={onSectionCount}
-              aria-label="Number of shapes"
+              aria-label={imageOn ? 'Dot density' : 'Number of shapes'}
             />
-            <p className="side-label">Colors for this section</p>
-            <div className="section-colors">
-              {studio.palette.swatches.map((swatch, index) => {
-                const checked = enabledColors.includes(swatch.id)
-                return (
-                  <label className="section-color" key={swatch.id}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={checked && enabledColors.length <= 2}
-                      aria-label={`Use color ${index + 1} in this section`}
-                      onChange={() => onSectionColor(swatch.id)}
-                    />
-                    <span style={{ background: swatchHex(swatch) }} />
-                  </label>
-                )
-              })}
-            </div>
-            <p className="section-note">Drag the picture to move the main shape.</p>
+            {imageOn ? null : (
+              <>
+                <p className="side-label">Colors for this section</p>
+                <div className="section-colors">
+                  {studio.palette.swatches.map((swatch, index) => {
+                    const checked = enabledColors.includes(swatch.id)
+                    return (
+                      <label className="section-color" key={swatch.id}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={checked && enabledColors.length <= 2}
+                          aria-label={`Use color ${index + 1} in this section`}
+                          onChange={() => onSectionColor(swatch.id)}
+                        />
+                        <span style={{ background: swatchHex(swatch) }} />
+                      </label>
+                    )
+                  })}
+                </div>
+                <p className="section-note">Drag the picture to move the main shape.</p>
+              </>
+            )}
           </div>
         ) : null}
 
@@ -1639,6 +1937,36 @@ export function Studio() {
           </button>
         </form>
       ) : null}
+      {expanded
+        ? createPortal(
+            <div className="canvas-lightbox" onClick={closeCanvas}>
+              <button
+                type="button"
+                className="canvas-lightbox-close"
+                aria-label="Close"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  closeCanvas()
+                }}
+              >
+                <CloseIcon />
+              </button>
+              <div
+                ref={holderRef}
+                className={track && shapesOn ? 'canvas-stage can-place is-expanded' : 'canvas-stage is-expanded'}
+                style={{ width: size.w, height: size.h, background: visualOn ? background : artwork }}
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={track && shapesOn ? onPlaceDown : undefined}
+                onPointerMove={onPlaceMove}
+                onPointerUp={onPlaceUp}
+                onPointerCancel={onPlaceUp}
+                role={track && visualOn ? 'img' : undefined}
+                aria-label={track && imageOn ? 'Halftone of the image' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
     </main>
   )
 }

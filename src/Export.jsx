@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { frameInput, paintFrame } from './drawFrame.js'
+import { prepareHalftone } from './halftoneField.js'
 import {
   FILM_FPS,
   LOGICAL,
@@ -24,7 +25,7 @@ const STYLE_LABELS = {
   bars: 'Bars',
   wave: 'Wave',
   poster: 'Poster',
-  image: 'Animate your image',
+  image: 'Image animation',
 }
 
 function Check({ checked, onChange, label, disabled }) {
@@ -46,10 +47,17 @@ function Artwork({ aspect, spec }) {
   const logical = LOGICAL[aspect]
   useEffect(() => {
     const canvas = ref.current
-    if (!canvas || !spec) return
-    canvas.width = logical.width
-    canvas.height = logical.height
-    paintFrame(canvas.getContext('2d'), spec)
+    if (!canvas || !spec) return undefined
+    let cancel = false
+    prepareHalftone(spec).then(() => {
+      if (cancel || ref.current !== canvas) return
+      canvas.width = logical.width
+      canvas.height = logical.height
+      paintFrame(canvas.getContext('2d'), spec)
+    })
+    return () => {
+      cancel = true
+    }
   }, [spec, logical])
   return <canvas ref={ref} className={`export-canvas export-canvas-${aspect.replace(':', '')}`} />
 }

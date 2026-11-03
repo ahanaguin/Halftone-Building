@@ -495,7 +495,7 @@ function motionOf(spec, time) {
   return Math.pow(20, (t - 0.5) * 2)
 }
 
-function biggestDropTimes(spec) {
+export function biggestDropTimes(spec) {
   const profile = spec.profile
   const timeline = profile?.timeline
   if (!timeline?.bass?.length || !timeline?.rms?.length) return []
