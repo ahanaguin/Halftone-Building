@@ -1,7 +1,7 @@
 import { hexToRgb, hslToHex, rgbToHsl } from './palette.js'
 import { biggestDropTimes } from './metaballs.js'
 import { metricsAt } from './profileTrack.js'
-import { PAPER, labelKind, mulberry32, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { INK_BLACK, PAPER, labelKind, mulberry32, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 
 const DT = 1 / 30
 const AUDIO_TAU = 0.3
@@ -23,7 +23,9 @@ uniform float uSpacing;
 uniform float uMinR;
 uniform float uMaxR;
 uniform float uReveal;
-uniform float uSwell;
+uniform float uFuse;
+uniform float uBloom;
+uniform float uContrast;
 uniform float uThreshold;
 uniform int uZoneCount;
 uniform vec3 uZones[3];
@@ -45,12 +47,12 @@ void main() {
   vec2 uv = p / uResolution;
   float shortSide = min(uResolution.x, uResolution.y);
   vec2 frame = uResolution / shortSide;
-  float zone = 0.0;
+  float zone = uBloom;
   for (int i = 0; i < 3; i++) {
     if (i >= uZoneCount) break;
     float dist = length((uv - uZones[i].xy) * frame);
     float radius = max(uZones[i].z, 0.001);
-    zone = max(zone, 1.0 - smoothstep(radius * 0.58, radius, dist));
+    zone = max(zone, 1.0 - smoothstep(radius * 0.7, radius, dist));
   }
   float ripple = 0.0;
   for (int i = 0; i < 3; i++) {
@@ -67,11 +69,14 @@ void main() {
     int dy = j / 5 - 2;
     ivec2 spot = cell + ivec2(dx, dy);
     vec2 center = uOrigin + vec2(spot) * uSpacing;
-    vec2 dotUv = clamp(center / uResolution, vec2(0.0), vec2(1.0));
-    float darkness = texture(uLum, dotUv).r;
-    float pictured = mix(uMinR, uMaxR * mix(0.12, 1.0, darkness), uReveal);
+    vec2 dotUv = center / uResolution;
+    if (dotUv.x < 0.0 || dotUv.y < 0.0 || dotUv.x > 1.0 || dotUv.y > 1.0) continue;
+    float lum = texture(uLum, dotUv).r;
+    float curved = clamp((lum - 0.5) * uContrast + 0.5, 0.0, 1.0);
+    float darkness = pow(clamp(1.0 - curved, 0.0, 1.0), 0.9);
+    float pictured = mix(uMinR, uMaxR * mix(0.2, 1.0, darkness), uReveal);
     float radius = mix(uMinR, pictured, zone);
-    radius *= 1.0 + zone * uSwell + ripple * 0.62;
+    radius *= 1.0 + zone * smoothstep(0.78, 0.96, darkness) * uFuse * 0.8 + ripple * 0.22;
     vec2 delta = p - center;
     float limit = max(radius * radius, 0.0001);
     float falloff = clamp(1.0 - dot(delta, delta) / limit, 0.0, 1.0);
@@ -169,27 +174,34 @@ function channels(hex) {
   return [red / 255, green / 255, blue / 255]
 }
 
-function darkestHex(colors) {
-  let best = '#161616'
-  let bestL = 2
-  for (const color of colors || []) {
-    if (!/^#[0-9a-fA-F]{6}$/.test(color)) continue
-    const [red, green, blue] = hexToRgb(color)
-    const lightness = rgbToHsl(red, green, blue)[2]
-    if (lightness < bestL) {
-      bestL = lightness
-      best = color
-    }
-  }
-  return best
+function mixHex(from, to, amount) {
+  const start = hexToRgb(from)
+  const end = hexToRgb(to)
+  const channel = (index) => Math.round(start[index] + (end[index] - start[index]) * amount).toString(16).padStart(2, '0')
+  return `#${channel(0)}${channel(1)}${channel(2)}`
 }
 
-function readableInk(hex, paper) {
-  const [red, green, blue] = hexToRgb(hex)
-  let [hue, saturation, lightness] = rgbToHsl(red, green, blue)
-  const ground = rgbToHsl(...hexToRgb(paper))[2]
-  if (Math.abs(lightness - ground) < 0.2) lightness = ground > 0.5 ? Math.max(0.06, ground - 0.42) : Math.min(0.94, ground + 0.42)
-  return hslToHex(hue, clamp(saturation, 0.04, 0.92), clamp(lightness, 0.04, 0.9))
+function sectionDots(spec, section) {
+  const fallback = hexOf(spec.dots, INK_BLACK)
+  if (!section) return fallback
+  const saved = spec.edits?.[sectionKey(section)]?.dots
+  return hexOf(saved, fallback)
+}
+
+function dotsAt(spec, time) {
+  const sections = spec.sections || []
+  if (!sections.length) return sectionDots(spec, null)
+  const now = Math.max(0, time || 0)
+  const fade = 1.5
+  for (let index = 1; index < sections.length; index += 1) {
+    const boundary = sections[index].start
+    const begin = boundary - fade
+    if (now < begin || now >= boundary) continue
+    const t = (now - begin) / fade
+    const eased = t * t * (3 - 2 * t)
+    return mixHex(sectionDots(spec, sections[index - 1]), sectionDots(spec, sections[index]), eased)
+  }
+  return sectionDots(spec, sectionAt(sections, now) || sections[0])
 }
 
 function darkGround(hex) {
@@ -200,7 +212,7 @@ function darkGround(hex) {
 
 export function halftoneColors(spec, time) {
   const paper = hexOf(spec.background, PAPER)
-  const ink = readableInk(darkestHex(spec.colors), paper)
+  const ink = dotsAt(spec, time)
   if (!invertedAt(spec, time)) return { ink, paper }
   return { ink: paper, paper: darkGround(ink) }
 }
@@ -232,6 +244,46 @@ function sizeOf(spec, time) {
     if (saved != null) size = saved
   }
   return clamp(size, 0, 100) / 100
+}
+
+function contrastOf(spec, time) {
+  let slider = 50
+  if (spec.sections?.length) {
+    const section = sectionAt(spec.sections, time || 0)
+    const saved = section ? spec.edits?.[sectionKey(section)]?.contrast : null
+    if (saved != null) slider = saved
+  }
+  return 0.85 + (clamp(slider, 0, 100) / 100) * 1.05
+}
+
+function zoneFraction(label, loud) {
+  const kind = labelKind(label)
+  const level = clamp(loud, 0, 1)
+  if (kind === 'Main' || kind === 'High' || kind === 'Peak') return 0.6 + level * 0.2
+  if (kind === 'Build') return 0.34 + level * 0.16
+  if (kind === 'Drop') return 0.6 + level * 0.2
+  return 0.2 + level * 0.1
+}
+
+function coverRadius(fraction, count, width, height) {
+  const shortSide = Math.max(1, Math.min(width, height))
+  const aspect = Math.max(width, height) / shortSide
+  const each = (fraction * aspect) / Math.max(1, count)
+  return Math.sqrt(Math.max(0.012, each / Math.PI)) / 0.58
+}
+
+function wantedImage(spec, section, sections) {
+  const urls = (spec.images || []).filter(Boolean)
+  if (!urls.length || !section) return 0
+  const ids = spec.imageIds || []
+  const saved = spec.edits?.[sectionKey(section)]?.image
+  if (saved) {
+    const found = ids.indexOf(saved)
+    if (found >= 0) return found % urls.length
+  }
+  if (spec.imageSwitch === 'off') return -1
+  const index = sections.findIndex((item) => item.start === section.start && item.label === section.label)
+  return Math.max(0, index) % urls.length
 }
 
 function motionOf(spec, time) {
@@ -267,26 +319,18 @@ function coverRect(image, aspect) {
   return { x: 0, y: (image.height - height) / 2, width: image.width, height }
 }
 
-function stretchContrast(pixels, width, height) {
-  const values = new Float32Array(width * height)
-  for (let index = 0; index < values.length; index += 1) {
+function encodeLuminance(pixels) {
+  const bytes = new Uint8Array(pixels.length / 4)
+  for (let index = 0; index < bytes.length; index += 1) {
     const offset = index * 4
-    values[index] = (0.2126 * pixels[offset] + 0.7152 * pixels[offset + 1] + 0.0722 * pixels[offset + 2]) / 255
-  }
-  const sorted = Array.from(values).sort((left, right) => left - right)
-  const low = sorted[Math.floor((sorted.length - 1) * 0.07)] ?? 0
-  const high = sorted[Math.floor((sorted.length - 1) * 0.93)] ?? 1
-  const span = Math.max(0.08, high - low)
-  const bytes = new Uint8Array(values.length)
-  for (let index = 0; index < values.length; index += 1) {
-    const darkness = 1 - clamp((values[index] - low) / span, 0, 1)
-    bytes[index] = Math.round(Math.pow(darkness, 0.82) * 255)
+    const lum = (0.2126 * pixels[offset] + 0.7152 * pixels[offset + 1] + 0.0722 * pixels[offset + 2]) / 255
+    bytes[index] = Math.round(clamp(lum, 0, 1) * 255)
   }
   return bytes
 }
 
 function fieldKey(url, aspect) {
-  return `${url}|${aspectKey(aspect, 1)}`
+  return `${url}|${aspectKey(aspect, 1)}|lum`
 }
 
 function decodeField(url, aspect) {
@@ -305,7 +349,7 @@ function decodeField(url, aspect) {
         const crop = coverRect(image, aspect)
         ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, size.width, size.height)
         const pixels = ctx.getImageData(0, 0, size.width, size.height).data
-        const field = { width: size.width, height: size.height, bytes: stretchContrast(pixels, size.width, size.height) }
+        const field = { width: size.width, height: size.height, bytes: encodeLuminance(pixels) }
         fields.set(key, field)
         resolve(field)
       } catch {
@@ -369,6 +413,8 @@ function createState(spec) {
     loud: 0.35,
     bass: 0.2,
     reach: 0.2,
+    fuse: 0,
+    bloom: 0,
     reveal: 1,
     revealHold: 0,
     imageIndex: 0,
@@ -396,8 +442,15 @@ function step(state, time, dt, spec) {
   const previous = metricsAt(spec.profile, Math.max(0, time - dt))
   state.loud = smoothToward(state.loud, metrics?.loud ?? 0.35, dt, AUDIO_TAU)
   state.bass = smoothToward(state.bass, metrics?.bass ?? 0.2, dt, AUDIO_TAU)
-  const reach = 0.16 + state.loud * 1.7
-  state.reach = smoothToward(state.reach || reach, reach, dt, 0.28)
+  const bassJump = (metrics?.bass ?? 0) - (previous?.bass ?? 0)
+  if (bassJump > 0.16 && (metrics?.bass ?? 0) > 0.45) state.fuse = 1
+  else state.fuse = Math.max(0, state.fuse * Math.exp(-dt / 0.09))
+  const fraction = zoneFraction(section?.label, state.loud)
+  const radius = coverRadius(fraction, state.zones.length, spec.width || 1, spec.height || 1)
+  state.reach = smoothToward(state.reach || radius, radius, dt, 0.35)
+  const hits = biggestDropTimes(spec)
+  if (hits.some((hit) => hit > time - dt - 0.02 && hit <= time + 0.001)) state.bloom = 1
+  state.bloom = Math.max(0, state.bloom - dt / 0.72)
   const drift = (0.045 + ((spec.tempo || 100) / 120) * 0.03) * Math.sqrt(Math.max(0.2, motionOf(spec, time)))
   for (const zone of state.zones) {
     zone.angle += Math.sin(time * 0.37 + zone.turn) * 0.55 * dt
@@ -416,13 +469,20 @@ function step(state, time, dt, spec) {
   }
   state.ripples = state.ripples.filter((ripple) => time - ripple.born < 0.9)
   const key = section ? sectionKey(section) : ''
-  const images = (spec.images || []).filter(Boolean)
+  let firstSection = false
+  let justEntered = false
   if (key !== state.sectionKey) {
-    const entered = state.sectionKey !== ''
+    justEntered = state.sectionKey !== ''
+    firstSection = state.sectionKey === ''
     state.sectionKey = key
     state.beatSalt = (sectionSeedOf(spec, section, sections) || 1) >>> 0
-    if (entered && spec.imageSwitch !== 'off' && images.length > 1) {
-      state.pendingIndex = (state.imageIndex + 1) % images.length
+    if ((justEntered || firstSection) && labelKind(section?.label || '') === 'Drop') state.bloom = 1
+  }
+  const wanted = wantedImage(spec, section, sections)
+  if (wanted >= 0 && wanted !== state.imageIndex && state.pendingIndex == null && state.revealHold <= 0) {
+    if (firstSection) state.imageIndex = wanted
+    else {
+      state.pendingIndex = wanted
       state.revealHold = 0.46
     }
   }
@@ -468,6 +528,7 @@ function bindField(field) {
   if (field === boundField) return
   boundField = field
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
   if (!field) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]))
     return
@@ -503,13 +564,14 @@ function paintCPU(ctx, spec, state, width, height) {
   const density = densityOf(spec, spec.time || 0)
   const spacing = Math.min(width, height) / density
   const amount = sizeOf(spec, spec.time || 0)
-  const maxR = spacing * (0.46 + amount * 0.5)
-  const minR = spacing * 0.15
+  const maxR = spacing * (0.22 + amount * 0.36)
+  const minR = spacing * 0.085
+  const contrast = contrastOf(spec, spec.time || 0)
   ctx.fillStyle = paper
   ctx.fillRect(0, 0, width, height)
   ctx.fillStyle = ink
-  const cols = Math.ceil(width / spacing) + 1
-  const rows = Math.ceil(height / spacing) + 1
+  const cols = Math.max(1, Math.floor(width / spacing))
+  const rows = Math.max(1, Math.floor(height / spacing))
   const originX = (width - (cols - 1) * spacing) / 2
   const originY = (height - (rows - 1) * spacing) / 2
   const field = activeField(spec, state)
@@ -517,13 +579,16 @@ function paintCPU(ctx, spec, state, width, height) {
     for (let x = 0; x < cols; x += 1) {
       const cx = originX + x * spacing
       const cy = originY + y * spacing
+      if (cx < 0 || cy < 0 || cx > width || cy > height) continue
       let darkness = 0
       if (field) {
         const px = clamp(Math.floor((cx / width) * field.width), 0, field.width - 1)
         const py = clamp(Math.floor((cy / height) * field.height), 0, field.height - 1)
-        darkness = field.bytes[py * field.width + px] / 255
+        const lum = field.bytes[py * field.width + px] / 255
+        const curved = clamp((lum - 0.5) * contrast + 0.5, 0, 1)
+        darkness = (1 - curved) ** 0.9
       }
-      const pictured = minR + (maxR * (0.12 + 0.88 * darkness) - minR) * state.reveal
+      const pictured = minR + (maxR * (0.2 + 0.8 * darkness) - minR) * state.reveal
       ctx.beginPath()
       ctx.arc(cx, cy, Math.max(0.5, pictured), 0, Math.PI * 2)
       ctx.fill()
@@ -556,14 +621,14 @@ export function paintHalftone(ctx, spec) {
   const density = densityOf(spec, time)
   const spacing = (Math.min(width, height) / density) * (bufferWidth / width)
   const amount = sizeOf(spec, time)
-  const maxR = spacing * (0.46 + amount * 0.5)
-  const minR = spacing * 0.15
-  const cols = Math.ceil(bufferWidth / spacing) + 1
-  const rows = Math.ceil(bufferHeight / spacing) + 1
+  const maxR = spacing * (0.22 + amount * 0.36)
+  const minR = spacing * 0.085
+  const cols = Math.max(1, Math.floor(bufferWidth / spacing))
+  const rows = Math.max(1, Math.floor(bufferHeight / spacing))
   const originX = (bufferWidth - (cols - 1) * spacing) / 2
   const originY = (bufferHeight - (rows - 1) * spacing) / 2
   const { ink, paper } = halftoneColors(spec, time)
-  const reach = state.reach * (1 + state.bass * 0.42)
+  const reach = state.reach
   const zones = state.zones.slice(0, 3)
   while (zones.length < 3) zones.push({ x: 0, y: 0 })
   const ripples = state.ripples.slice(-3)
@@ -579,8 +644,10 @@ export function paintHalftone(ctx, spec) {
   gl.uniform1f(location('uMinR'), minR)
   gl.uniform1f(location('uMaxR'), maxR)
   gl.uniform1f(location('uReveal'), state.reveal)
-  gl.uniform1f(location('uSwell'), state.bass * 0.36)
-  gl.uniform1f(location('uThreshold'), 0.2)
+  gl.uniform1f(location('uFuse'), state.fuse)
+  gl.uniform1f(location('uBloom'), state.bloom)
+  gl.uniform1f(location('uContrast'), contrastOf(spec, time))
+  gl.uniform1f(location('uThreshold'), 0.16)
   gl.uniform1i(location('uZoneCount'), Math.min(3, state.zones.length))
   gl.uniform3fv(location('uZones'), new Float32Array(zones.flatMap((zone) => [zone.x, zone.y, reach])))
   gl.uniform1i(location('uRippleCount'), state.ripples.length)

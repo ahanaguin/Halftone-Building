@@ -145,6 +145,8 @@ export function Studio() {
   const [arrangementAck, setArrangementAck] = useState(null)
   const [compositionAck, setCompositionAck] = useState(null)
   const [backgroundAck, setBackgroundAck] = useState(null)
+  const [dotsAck, setDotsAck] = useState(null)
+  const [imageAck, setImageAck] = useState(null)
   const [picker, setPicker] = useState(null)
   const [renaming, setRenaming] = useState(null)
   const [resetAsk, setResetAsk] = useState(false)
@@ -195,6 +197,7 @@ export function Studio() {
     speed: studio.speed ?? 50,
     style: studio.style,
     images: (studio.images || []).map((image) => image.url),
+    imageIds: (studio.images || []).map((image) => image.id),
     imageSwitch: studio.imageSwitch || 'section',
   })
 
@@ -228,6 +231,7 @@ export function Studio() {
     print: activeEdit.print !== false,
     style: studio.style,
     images: (studio.images || []).map((image) => image.url),
+    imageIds: (studio.images || []).map((image) => image.id),
     imageSwitch: studio.imageSwitch || 'section',
   }
 
@@ -428,6 +432,7 @@ export function Studio() {
         live.print = playingEdit.print !== false
         live.style = studioNow.style
         live.images = (studioNow.images || []).map((image) => image.url)
+        live.imageIds = (studioNow.images || []).map((image) => image.id)
         live.imageSwitch = studioNow.imageSwitch || 'section'
         const shown = pickRecipe(live.seed, live.sectionLabel || 'Quiet', live.roundness ?? 0.7)
         if (shown !== posterRef.current) {
@@ -691,6 +696,10 @@ export function Studio() {
     writeSection({ count: Number(event.target.value) })
   }
 
+  function onSectionContrast(event) {
+    writeSection({ contrast: Number(event.target.value) })
+  }
+
   function onComposition(event) {
     setArrangementAck(null)
     setCompositionAck(null)
@@ -741,6 +750,25 @@ export function Studio() {
     showToast('Background applied to all sections.')
   }
 
+  function applyDots() {
+    if (!sections.length) return
+    const hex = isHex(studio.edits?.[activeKey]?.dots) ? studio.edits[activeKey].dots : INK_BLACK
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        if ((previous.dots || '').toLowerCase() === hex.toLowerCase()) continue
+        edits[key] = { ...previous, dots: hex }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setDotsAck(hex.toLowerCase())
+    showToast('Dots applied to all sections.')
+  }
+
   function onImages(event) {
     const files = [...(event.target.files || [])]
     event.target.value = ''
@@ -758,7 +786,55 @@ export function Studio() {
   }
 
   function removeImage(id) {
-    editStudio((current) => ({ ...current, images: (current.images || []).filter((image) => image.id !== id) }))
+    editStudio((current) => {
+      const images = (current.images || []).filter((image) => image.id !== id)
+      const edits = { ...(current.edits || {}) }
+      for (const key of Object.keys(edits)) {
+        if (edits[key]?.image !== id) continue
+        const next = { ...edits[key] }
+        delete next.image
+        if (Object.keys(next).length) edits[key] = next
+        else delete edits[key]
+      }
+      return { ...current, images, edits }
+    })
+  }
+
+  function imageIdFor(item, source = studio) {
+    const list = source.images || []
+    if (!item || !list.length) return ''
+    const saved = source.edits?.[sectionKey(item)]?.image
+    if (saved && list.some((image) => image.id === saved)) return saved
+    if ((source.imageSwitch || 'section') === 'off') return list[0].id
+    const order = workingSections(track, source)
+    const index = order.findIndex((entry) => entry.start === item.start && entry.label === item.label)
+    return list[Math.max(0, index) % list.length].id
+  }
+
+  function assignImage(id) {
+    if (!section) return
+    setImageAck(null)
+    writeSection({ image: id })
+  }
+
+  function applyImage() {
+    if (!section) return
+    const id = imageIdFor(section)
+    if (!id) return
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        if (previous.image === id) continue
+        edits[key] = { ...previous, image: id }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setImageAck(id)
+    showToast('Image applied to all sections.')
   }
 
   function onImageSwitch(event) {
@@ -779,6 +855,21 @@ export function Studio() {
       return
     }
     writeSection({ speed: value })
+  }
+
+  function commitDots(hex, previous, custom) {
+    if (!isHex(hex)) return
+    setDotsAck(null)
+    editStudio((current) => {
+      let backgrounds = [...(current.backgrounds || [])]
+      const choices = backgroundChoicesOf(current, activePalette)
+      const known = choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())
+      if (custom && previous && previous.toLowerCase() !== hex.toLowerCase()) backgrounds = backgrounds.map((item) => (item.toLowerCase() === previous.toLowerCase() ? hex : item))
+      else if (!known && choices.length < MAX_BACKGROUNDS) backgrounds.push(hex)
+      const edits = { ...(current.edits || {}) }
+      if (activeKey) edits[activeKey] = { ...(edits[activeKey] || {}), dots: hex }
+      return { ...current, backgrounds, edits }
+    })
   }
 
   function commitBackground(hex, previous, custom) {
@@ -810,7 +901,8 @@ export function Studio() {
           swatches: [...palette.swatches, { id: `swatch-add-${Date.now().toString(36)}`, h, s, l, locked: false }],
         }
       })
-    } else if (picker.target === 'palette') onPick(picker.id, picker.hex)
+    }     else if (picker.target === 'palette') onPick(picker.id, picker.hex)
+    else if (picker.target === 'dots') commitDots(picker.hex, picker.previous, picker.custom)
     else commitBackground(picker.hex, picker.previous, picker.custom)
     setPicker(null)
   }
@@ -859,6 +951,9 @@ export function Studio() {
           edit.x ||
           edit.y ||
           isHex(edit.background) ||
+          isHex(edit.dots) ||
+          edit.image ||
+          edit.contrast != null ||
           edit.palette?.swatches?.length ||
           edit.roundness != null ||
           edit.speed != null ||
@@ -924,13 +1019,14 @@ export function Studio() {
   useEffect(() => {
     if (!picker) return undefined
     function finish() {
-      if (picker.target === 'background' && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
+      const field = picker.target === 'background' ? 'background' : picker.target === 'dots' ? 'dots' : ''
+      if (field && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
         const revert = picker.revert
         editStudio((current) => {
           const edits = { ...(current.edits || {}) }
           const previous = { ...(edits[activeKey] || {}) }
-          if (revert) previous.background = revert
-          else delete previous.background
+          if (revert) previous[field] = revert
+          else delete previous[field]
           if (Object.keys(previous).length) edits[activeKey] = previous
           else delete edits[activeKey]
           return { ...current, edits }
@@ -992,6 +1088,9 @@ export function Studio() {
   const tune = { ...TUNE_DEFAULTS, ...(studio.tune || {}) }
   const background = backgroundAt({ background: studio.background, edits: studio.edits || {}, sections }, audioRef.current?.currentTime || section?.start || 0)
   const sectionBackground = isHex(sectionEdit.background) ? sectionEdit.background : studio.background || PAPER
+  const sectionDots = isHex(sectionEdit.dots) ? sectionEdit.dots : INK_BLACK
+  const contrastValue = sectionEdit.contrast ?? 50
+  const selectedImage = section ? imageIdFor(section) : ''
   const shineOn = studio.shine !== false
   const motion = activeEdit.speed ?? studio.speed ?? 50
   const compositionUniform = Boolean(
@@ -1005,10 +1104,23 @@ export function Studio() {
         return hex.toLowerCase() === sectionBackground.toLowerCase()
       }),
   )
+  const dotsUniform = Boolean(
+    sections.length &&
+      sections.every((item) => {
+        const saved = studio.edits?.[sectionKey(item)]?.dots
+        const hex = isHex(saved) ? saved : INK_BLACK
+        return hex.toLowerCase() === sectionDots.toLowerCase()
+      }),
+  )
+  const imageUniform = Boolean(sections.length && images.length && sections.every((item) => imageIdFor(item) === selectedImage))
   if (compositionAck != null && !compositionUniform) setCompositionAck(null)
   if (backgroundAck != null && !backgroundUniform) setBackgroundAck(null)
+  if (dotsAck != null && !dotsUniform) setDotsAck(null)
+  if (imageAck != null && !imageUniform) setImageAck(null)
   const compositionApplied = compositionAck === composition && compositionUniform
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
+  const dotsApplied = dotsAck === sectionDots.toLowerCase() && dotsUniform
+  const imageApplied = imageAck === selectedImage && imageUniform
   const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
   const backgroundChoices = backgroundChoicesOf(studio, activePalette)
   const sectionIndex = sections.findIndex((item) => sameSection(section, item))
@@ -1295,7 +1407,7 @@ export function Studio() {
           <strong>Why it looks like this</strong>
           <p>
             {imageOn
-              ? 'Dots follow the photo. Dark areas grow larger, and soft zones drift across to reveal it. Bass makes them swell and fuse, and a beat sends a ripple through the grid.'
+              ? 'Most of the grid stays a fine dot pattern. Soft zones drift across and reveal the photo where they pass. A strong bass hit fuses the darkest dots for a moment, and a beat sends a ripple through the grid.'
               : explainPoster(poster)}
           </p>
         </div>
@@ -1378,6 +1490,11 @@ export function Studio() {
                           type="button"
                           className={selected ? 'section-chip selected' : 'section-chip'}
                           aria-pressed={selected}
+                          onMouseEnter={(event) => {
+                            const node = event.currentTarget
+                            if (node.scrollWidth > node.clientWidth + 1) node.title = item.label
+                            else node.removeAttribute('title')
+                          }}
                           onClick={(event) => {
                             if (event.shiftKey) {
                               setPicked((current) => (sameSection(current, item) || sameSection(section, item) ? null : item))
@@ -1461,14 +1578,26 @@ export function Studio() {
               <span className="image-count">{images.length} of 5</span>
             </div>
             <div className="image-grid">
-              {images.map((image) => (
-                <div className="image-slot" key={image.id}>
-                  <img src={image.url} alt={image.name || 'Uploaded image'} />
-                  <button type="button" className="image-remove" aria-label={`Remove ${image.name || 'image'}`} onClick={() => removeImage(image.id)}>
-                    ×
-                  </button>
-                </div>
-              ))}
+              {images.map((image) => {
+                const chosen = image.id === selectedImage
+                return (
+                  <div className={chosen ? 'image-slot is-selected' : 'image-slot'} key={image.id}>
+                    <button
+                      type="button"
+                      className="image-pick"
+                      aria-pressed={chosen}
+                      aria-label={`Use ${image.name || 'image'} for this section`}
+                      disabled={!section}
+                      onClick={() => assignImage(image.id)}
+                    >
+                      <img src={image.url} alt="" />
+                    </button>
+                    <button type="button" className="image-remove" aria-label={`Remove ${image.name || 'image'}`} onClick={() => removeImage(image.id)}>
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
               {images.length < 5 ? (
                 <button type="button" className="image-slot is-add" aria-label="Add an image" onClick={() => imageInputRef.current?.click()}>
                   +
@@ -1483,7 +1612,18 @@ export function Studio() {
               multiple
               onChange={onImages}
             />
-            {images.length ? null : <p className="section-note">Add a photo. Dark areas become larger dots.</p>}
+            {images.length ? (
+              <button
+                type="button"
+                className={imageApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+                disabled={!section || !sections.length}
+                onClick={applyImage}
+              >
+                {imageApplied ? 'Applied to all sections ✓' : 'Apply image to all sections'}
+              </button>
+            ) : (
+              <p className="section-note">Add a photo. Dark areas become larger dots.</p>
+            )}
             <p className="side-label">Switch images on</p>
             <label className="style-field">
               <select className="style-select" aria-label="Switch images on" value={studio.imageSwitch || 'section'} onChange={onImageSwitch}>
@@ -1520,6 +1660,59 @@ export function Studio() {
             >
               {compositionApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
+            {imageOn ? (
+              <>
+                <p className="side-label">Dots</p>
+                <div className="swatches background-swatches" role="listbox" aria-label="Dots">
+                  {backgroundChoices.map((choice) => {
+                    const selected = choice.hex.toLowerCase() === sectionDots.toLowerCase()
+                    return (
+                      <button
+                        key={`dots-${choice.label}-${choice.hex}`}
+                        type="button"
+                        className={selected ? 'swatch is-on' : 'swatch'}
+                        style={{ background: choice.hex }}
+                        aria-label={choice.label}
+                        aria-selected={selected}
+                        disabled={!section}
+                        onClick={(event) => {
+                          const changed = choice.hex.toLowerCase() !== sectionDots.toLowerCase()
+                          if (changed) {
+                            setDotsAck(null)
+                            writeSection({ dots: choice.hex })
+                          }
+                          openPicker(event, {
+                            mode: 'edit',
+                            target: 'dots',
+                            hex: choice.hex,
+                            previous: choice.hex,
+                            custom: Boolean(choice.custom),
+                            ...(changed ? { revert: isHex(sectionEdit.dots) ? sectionEdit.dots : null } : {}),
+                          })
+                        }}
+                      />
+                    )
+                  })}
+                  <button
+                    type="button"
+                    className="add-swatch"
+                    aria-label="Add a dots color"
+                    disabled={!section || backgroundChoices.length >= MAX_BACKGROUNDS}
+                    onClick={(event) => openPicker(event, { mode: 'add', target: 'dots', hex: '#d25a3a' })}
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={dotsApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+                  disabled={!section || !sections.length}
+                  onClick={applyDots}
+                >
+                  {dotsApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
+                </button>
+              </>
+            ) : null}
             <p className="side-label">Background</p>
             <div className="swatches background-swatches" role="listbox" aria-label="Background">
               {backgroundChoices.map((choice) => {
@@ -1721,7 +1914,25 @@ export function Studio() {
               onChange={onSectionCount}
               aria-label={imageOn ? 'Dot density' : 'Number of shapes'}
             />
-            {imageOn ? null : (
+            {imageOn ? (
+              <>
+                <div className="slider-labels">
+                  <span>Image contrast</span>
+                </div>
+                <input
+                  className="range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={contrastValue}
+                  onPointerDown={startSlide}
+                  onPointerUp={finishSlide}
+                  onPointerCancel={finishSlide}
+                  onChange={onSectionContrast}
+                  aria-label="Image contrast"
+                />
+              </>
+            ) : (
               <>
                 <p className="side-label">Colors for this section</p>
                 <div className="section-colors">

@@ -54,6 +54,7 @@ export function mountShapes(node, liveRef, sizeRef) {
         print: live.print,
         style: live.style,
         images: live.images,
+        imageIds: live.imageIds,
         imageSwitch: live.imageSwitch,
       })
     }
