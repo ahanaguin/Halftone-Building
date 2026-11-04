@@ -2,6 +2,7 @@ import { paletteColors, swatchHex } from './palette.js'
 import { frameMode, paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
 import { imageComposition, paintCollage } from './collageField.js'
 import { paintHalftone } from './halftoneField.js'
+import { paintMosaic } from './mosaicField.js'
 import { paintGrid } from './gridField.js'
 import { metricsAt } from './profileTrack.js'
 import { workingSections } from './sectionEdit.js'
@@ -54,7 +55,9 @@ export function paintFrame(ctx, spec) {
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
   if (spec.style === 'image') {
-    if (imageComposition(spec) === 'collage') paintCollage(ctx, spec)
+    const composition = imageComposition(spec)
+    if (composition === 'collage') paintCollage(ctx, spec)
+    else if (composition === 'mosaic') paintMosaic(ctx, spec)
     else paintHalftone(ctx, spec)
   }
   else if (frameMode(spec) === 'grid') paintGrid(ctx, spec)

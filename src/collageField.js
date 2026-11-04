@@ -4,6 +4,7 @@ import { PAPER, labelKind, mulberry32, sectionAt, sectionKey, sectionSeed } from
 
 export const PANEL_COUNT = { min: 3, max: 8 }
 export const GUTTER_DEFAULT = 35
+export const FOCUS_SPAN = 0.36
 
 const DT = 1 / 30
 const CHANGE = 0.6
@@ -41,7 +42,9 @@ export function imageComposition(spec) {
   const sections = spec.sections || []
   const section = sectionAt(sections, spec.time || 0)
   const saved = section ? spec.edits?.[sectionKey(section)]?.composition : spec.composition
-  return saved === 'collage' ? 'collage' : 'halftone'
+  if (saved === 'collage') return 'collage'
+  if (saved === 'mosaic') return 'mosaic'
+  return 'halftone'
 }
 
 export function collageCount(spec, section) {
@@ -56,20 +59,12 @@ export function collageCount(spec, section) {
   return 3 + (seed % 2)
 }
 
-function gutterPx(spec, section, width) {
-  const saved = section ? spec.edits?.[sectionKey(section)]?.size : null
-  const size = saved == null ? GUTTER_DEFAULT : clamp(Number(saved) || 0, 0, 100)
-  return Math.max(2, width * (0.004 + (size / 100) * 0.046))
+function gutterPx(width) {
+  return Math.max(2, width * (0.004 + (GUTTER_DEFAULT / 100) * 0.046))
 }
 
 function flag(spec, section, name) {
   return Boolean(section && spec.edits?.[sectionKey(section)]?.[name])
-}
-
-function paceOf(spec, section) {
-  const saved = section ? spec.edits?.[sectionKey(section)]?.speed : spec.speed
-  const t = clamp((saved ?? 50) / 100, 0, 1)
-  return 0.55 + t * 0.9
 }
 
 function measure(image) {
@@ -187,17 +182,77 @@ function pointsFor(spec, url, imageId) {
   return details.get(url)?.points || [{ x: 0.5, y: 0.45 }]
 }
 
-function subjectCenter(points) {
-  if (!points.length) return { x: 0.5, y: 0.46 }
-  const x = points.reduce((sum, point) => sum + point.x, 0) / points.length
-  const y = points.reduce((sum, point) => sum + point.y, 0) / points.length
-  return { x, y }
+export function collageImageIds(spec, section) {
+  const urls = spec.images || []
+  const rawIds = spec.imageIds || []
+  const ids = []
+  for (let index = 0; index < urls.length; index += 1) {
+    if (urls[index] && rawIds[index]) ids.push(rawIds[index])
+  }
+  if (!ids.length) return []
+  const edit = section ? spec.edits?.[sectionKey(section)] : null
+  if (Array.isArray(edit?.images)) {
+    const picked = ids.filter((id) => edit.images.includes(id))
+    if (picked.length) return picked
+  }
+  if (edit?.image && ids.includes(edit.image)) return [edit.image]
+  if ((spec.imageSwitch || 'section') === 'off') return [ids[0]]
+  const sections = spec.sections || []
+  const index = section
+    ? sections.findIndex((item) => item.start === section.start && item.label === section.label)
+    : 0
+  return [ids[Math.max(0, index) % ids.length]]
+}
+
+function groupsFor(spec, section) {
+  const urls = (spec.images || []).filter(Boolean)
+  const ids = spec.imageIds || []
+  if (!urls.length) return []
+  const allowed = new Set(collageImageIds(spec, section))
+  const groups = []
+  urls.forEach((url, index) => {
+    const id = ids[index]
+    if (allowed.size && id != null && !allowed.has(id)) return
+    const points = pointsFor(spec, url, id)
+    const shots = []
+    for (const point of points) {
+      const span = Number(point?.span)
+      shots.push({
+        url,
+        x: point.x,
+        y: point.y,
+        span: Number.isFinite(span) && span > 0 ? span : FOCUS_SPAN,
+      })
+    }
+    if (shots.length) groups.push(shots)
+  })
+  return groups
+}
+
+function shotAt(groups, slot, turn) {
+  if (!groups.length) return null
+  const group = groups[Math.abs(slot) % groups.length]
+  const step = Math.floor(Math.abs(slot) / groups.length) + (slot === 0 ? 0 : turn)
+  return group[Math.abs(step) % group.length]
+}
+
+function speedOf(spec, section) {
+  const saved = section ? spec.edits?.[sectionKey(section)]?.speed : null
+  const slider = saved == null ? spec.speed : saved
+  const value = Number(slider)
+  return clamp(Number.isFinite(value) ? value : 50, 0, 100)
+}
+
+function cutBeats(spec, section) {
+  const t = speedOf(spec, section) / 100
+  if (t <= 0.5) return 8 * 0.25 ** (t / 0.5)
+  return 2 * 0.2 ** ((t - 0.5) / 0.5)
 }
 
 function layoutFor(spec, section, index, width, height) {
   const sections = spec.sections || []
   const count = collageCount(spec, section)
-  const gutter = gutterPx(spec, section, width)
+  const gutter = gutterPx(width)
   const rand = mulberry32((sectionSeedOf(spec, section, sections) || 1) ^ Math.imul(index + 1, 0x85ebca6b))
   const imageCount = Math.max(1, (spec.images || []).filter(Boolean).length)
   const minSide = Math.min(width, height) * 0.18
@@ -219,12 +274,14 @@ function layoutFor(spec, section, index, width, height) {
       cells.splice(item.cursor, 1)
       if (vertical) {
         const cut = clamp(cell.w * ratio, minSide, cell.w - minSide)
-        cells.push({ x: cell.x, y: cell.y, w: cut, h: cell.h })
-        cells.push({ x: cell.x + cut, y: cell.y, w: cell.w - cut, h: cell.h })
+        const boundary = Math.round(cell.x + cut)
+        cells.push({ x: cell.x, y: cell.y, w: Math.max(1, boundary - cell.x), h: cell.h })
+        cells.push({ x: boundary, y: cell.y, w: Math.max(1, cell.x + cell.w - boundary), h: cell.h })
       } else {
         const cut = clamp(cell.h * ratio, minSide, cell.h - minSide)
-        cells.push({ x: cell.x, y: cell.y, w: cell.w, h: cut })
-        cells.push({ x: cell.x, y: cell.y + cut, w: cell.w, h: cell.h - cut })
+        const boundary = Math.round(cell.y + cut)
+        cells.push({ x: cell.x, y: cell.y, w: cell.w, h: Math.max(1, boundary - cell.y) })
+        cells.push({ x: cell.x, y: boundary, w: cell.w, h: Math.max(1, cell.y + cell.h - boundary) })
       }
       placed = true
       break
@@ -232,15 +289,11 @@ function layoutFor(spec, section, index, width, height) {
     if (!placed) break
   }
   const panels = cells.map((cell) => {
-    const jitter = gutter * 0.28
-    const x = clamp(cell.x + gutter * 0.5 + (rand() - 0.5) * jitter, 0, width - 4)
-    const y = clamp(cell.y + gutter * 0.5 + (rand() - 0.5) * jitter, 0, height - 4)
-    const w = clamp(cell.w - gutter, 4, width - x)
-    const h = clamp(cell.h - gutter, 4, height - y)
-    const left = Math.round(x)
-    const top = Math.round(y)
-    const right = Math.round(x + w)
-    const bottom = Math.round(y + h)
+    const inset = gutter * 0.5
+    const left = Math.round(cell.x + inset)
+    const top = Math.round(cell.y + inset)
+    const right = Math.round(cell.x + cell.w - inset)
+    const bottom = Math.round(cell.y + cell.h - inset)
     return {
       x: left,
       y: top,
@@ -307,21 +360,18 @@ function layoutsAt(spec, time, width, height) {
   return blendLayouts(previous, next, easeInOut(elapsed / CHANGE))
 }
 
-function cropFor(panel, cropIndex, points) {
-  const rand = mulberry32((panel.seed ^ Math.imul(cropIndex + 1, 0x9e3779b1)) >>> 0)
-  if (panel.wide) {
-    const subject = subjectCenter(points)
-    return {
-      x: clamp(subject.x + (rand() - 0.5) * 0.12, 0.18, 0.82),
-      y: clamp(subject.y + (rand() - 0.5) * 0.1, 0.18, 0.82),
-      zoom: 1.08 + rand() * 0.34,
-    }
-  }
-  const point = points.length ? points[Math.abs(cropIndex) % points.length] : { x: 0.5, y: 0.45 }
+function zoomOf(point, fallback) {
+  const span = Number(point?.span)
+  if (!Number.isFinite(span) || span <= 0) return fallback
+  return clamp(1 / clamp(span, 0.12, 0.95), 1.05, 8)
+}
+
+function cropFor(shot) {
+  const point = shot || { x: 0.5, y: 0.45, span: FOCUS_SPAN }
   return {
-    x: clamp(point.x + (rand() - 0.5) * 0.05, 0.06, 0.94),
-    y: clamp(point.y + (rand() - 0.5) * 0.05, 0.06, 0.94),
-    zoom: 2.25 + rand() * 1.45,
+    x: clamp(point.x, 0.02, 0.98),
+    y: clamp(point.y, 0.02, 0.98),
+    zoom: zoomOf(point, 1 / FOCUS_SPAN),
   }
 }
 
@@ -370,8 +420,9 @@ function step(state, time, dt, spec) {
   const section = sectionAt(spec.sections || [], time)
   const count = collageCount(spec, section)
   const beat = 60 / Math.max(1, spec.tempo || 100)
+  const gap = beat * cutBeats(spec, section)
   if (dropNow(spec, section, time, beat)) {
-    if (time - state.lastBurst >= beat * 0.5) {
+    if (time - state.lastBurst >= Math.max(beat * 0.2, gap * 0.35)) {
       for (let index = 0; index < count; index += 1) {
         state.crop[index] = (state.crop[index] + 1) % 12
         state.lastCut[index] = time
@@ -385,19 +436,20 @@ function step(state, time, dt, spec) {
   state.lastBeat = time
   const kind = labelKind(section?.label || '')
   const fast = kind === 'Main' || kind === 'High' || kind === 'Peak' || kind === 'Build' || kind === 'Drop'
-  if (!fast && state.beatIndex % 2 !== 0) return
-  let pick = -1
-  let waited = 0
+  const speed = speedOf(spec, section)
+  if (speed < 75 && !fast && state.beatIndex % 2 !== 0) return
+  const ready = []
   for (let index = 0; index < count; index += 1) {
     const age = time - state.lastCut[index]
-    if (age + 1e-4 >= beat * 2 && age > waited) {
-      waited = age
-      pick = index
-    }
+    if (age + 1e-4 >= gap) ready.push({ index, age })
   }
-  if (pick < 0) return
-  state.crop[pick] = (state.crop[pick] + 1) % 12
-  state.lastCut[pick] = time
+  if (!ready.length) return
+  ready.sort((a, b) => b.age - a.age)
+  const howMany = speed >= 85 ? Math.min(3, ready.length) : speed >= 65 ? Math.min(2, ready.length) : 1
+  for (const item of ready.slice(0, howMany)) {
+    state.crop[item.index] = (state.crop[item.index] + 1) % 12
+    state.lastCut[item.index] = time
+  }
 }
 
 function simulate(spec, time) {
@@ -416,11 +468,9 @@ function simulate(spec, time) {
   return simCache.state
 }
 
-function sourceRect(image, panel, crop, time, pace) {
-  const rate = 0.22 * pace
-  const travel = Math.sin(time * rate + panel.phase) * 0.07
+function sourceRect(image, panel, crop) {
   const aspect = panel.w / Math.max(1, panel.h)
-  const zoom = crop.zoom * (1 + 0.07 * Math.sin(time * rate * 0.7 + panel.phase * 0.6))
+  const zoom = crop.zoom
   let srcW = image.width / zoom
   let srcH = srcW / aspect
   if (srcH > image.height) {
@@ -429,24 +479,14 @@ function sourceRect(image, panel, crop, time, pace) {
   }
   srcW = Math.min(srcW, image.width)
   srcH = Math.min(srcH, image.height)
-  const cx = (crop.x + Math.cos(panel.angle) * travel) * image.width
-  const cy = (crop.y + Math.sin(panel.angle) * travel) * image.height
+  const cx = crop.x * image.width
+  const cy = crop.y * image.height
   return {
     sx: clamp(cx - srcW / 2, 0, Math.max(0, image.width - srcW)),
     sy: clamp(cy - srcH / 2, 0, Math.max(0, image.height - srcH)),
     srcW: Math.max(1, srcW),
     srcH: Math.max(1, srcH),
   }
-}
-
-function nudge(panel, bass, width, height) {
-  const cx = panel.x + panel.w / 2
-  const cy = panel.y + panel.h / 2
-  const dx = width / 2 - cx
-  const dy = height / 2 - cy
-  const length = Math.hypot(dx, dy) || 1
-  const dist = clamp(bass, 0, 1) * 0.02 * Math.min(panel.w, panel.h)
-  return { ...panel, x: panel.x + (dx / length) * dist, y: panel.y + (dy / length) * dist }
 }
 
 function grainSource() {
@@ -478,7 +518,6 @@ export function paintCollage(ctx, spec) {
   if (!(width > 0) || !(height > 0)) return
   const time = spec.time || 0
   const urls = (spec.images || []).filter(Boolean)
-  const ids = spec.imageIds || []
   for (const url of urls) {
     if (!images.has(url) && !loading.has(url)) loadImage(url)
   }
@@ -494,22 +533,22 @@ export function paintCollage(ctx, spec) {
   }
   const section = sectionAt(spec.sections || [], time)
   const panels = layoutsAt(spec, time, width, height)
+  const groups = groupsFor(spec, section)
   const state = simulate(spec, time)
-  const pace = paceOf(spec, section)
   const mono = flag(spec, section, 'mono')
   const grain = flag(spec, section, 'grain')
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
   for (const panel of panels) {
     if (panel.w < 2 || panel.h < 2) continue
-    const url = urls[panel.imageIndex % urls.length]
+    const turned = panel.slot === 0 ? 0 : state.crop[panel.slot] || 0
+    const shot = shotAt(groups, panel.slot, turned)
+    const url = shot?.url || urls[panel.imageIndex % urls.length]
     const image = images.get(url)
     if (!image) continue
-    const id = ids[panel.imageIndex % urls.length]
-    const points = pointsFor(spec, url, id)
-    const crop = cropFor(panel, state.crop[panel.slot] || 0, points)
-    const rect = nudge(panel, state.bass, width, height)
-    const source = sourceRect(image, rect, crop, time, pace)
+    const crop = cropFor(shot)
+    const rect = panel
+    const source = sourceRect(image, rect, crop)
     ctx.save()
     ctx.globalAlpha = panel.alpha == null ? 1 : panel.alpha
     ctx.beginPath()

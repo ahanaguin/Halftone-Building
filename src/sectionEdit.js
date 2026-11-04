@@ -1,4 +1,4 @@
-import { sectionKey, sectionSeed } from './shapeLayout.js'
+import { sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 
 export const MIN_SECTION = 4
 export const MAX_LABEL = 16
@@ -98,6 +98,31 @@ export function dropKey(map, key) {
 
 export function freshSeed(section, index) {
   return (sectionSeed(section, index) ^ 0x51ed) >>> 0
+}
+
+export function sectionAfterEdit(current, list) {
+  if (!current || !list?.length) return current || null
+  const exact = list.find(
+    (item) =>
+      item.label === current.label &&
+      Math.abs(item.start - current.start) < 0.0005 &&
+      Math.abs(item.end - current.end) < 0.0005,
+  )
+  if (exact) return exact
+  let best = null
+  let bestOverlap = 0
+  for (const item of list) {
+    if (item.label !== current.label) continue
+    const overlap = Math.min(item.end, current.end) - Math.max(item.start, current.start)
+    const closer = best && Math.abs(item.start - current.start) < Math.abs(best.start - current.start)
+    if (overlap > bestOverlap + 1e-4 || (best && Math.abs(overlap - bestOverlap) < 1e-4 && closer)) {
+      bestOverlap = overlap
+      best = item
+    }
+  }
+  if (best && bestOverlap > 0) return best
+  const midpoint = Math.min(Math.max((current.start + current.end) / 2, list[0].start), list[list.length - 1].end - 0.001)
+  return sectionAt(list, midpoint) || list[0]
 }
 
 export function rekeyBoundary(studio, before, after) {

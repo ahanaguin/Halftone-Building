@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ensureFocus } from './collageField.js'
+import { FOCUS_SPAN, ensureFocus } from './collageField.js'
 
 function fit(stage, width, height) {
   if (!stage || !(width > 0) || !(height > 0)) return null
@@ -13,6 +13,7 @@ function fit(stage, width, height) {
 export function FocusEditor({ images, focus, onChange, onClose }) {
   const [active, setActive] = useState(images[0]?.id || '')
   const [points, setPoints] = useState([])
+  const [selected, setSelected] = useState(0)
   const [natural, setNatural] = useState(null)
   const [frame, setFrame] = useState(null)
   const stageRef = useRef(null)
@@ -70,20 +71,50 @@ export function FocusEditor({ images, focus, onChange, onClose }) {
     }
   }
 
+  function spanOf(point) {
+    const span = Number(point?.span)
+    return Number.isFinite(span) ? Math.min(0.95, Math.max(0.12, span)) : FOCUS_SPAN
+  }
+
+  function spanFromEvent(event, point) {
+    const node = frameRef.current
+    if (!node || !point) return null
+    const box = node.getBoundingClientRect()
+    if (!(box.width > 0)) return null
+    const cx = box.left + point.x * box.width
+    const cy = box.top + point.y * box.height
+    const dist = Math.hypot(event.clientX - cx, event.clientY - cy)
+    return Math.min(0.95, Math.max(0.12, (dist * 2) / box.width))
+  }
+
   function onFrameClick(event) {
     if (event.target.closest('.focus-point')) return
     if (points.length >= 6) return
     const point = pointFromEvent(event)
     if (!point || !image) return
-    const next = [...points, point]
+    const next = [...points, { ...point, span: FOCUS_SPAN }]
     setPoints(next)
+    setSelected(next.length - 1)
     onChange(image.id, next)
   }
 
   function onPointDown(event, index) {
     event.stopPropagation()
     event.preventDefault()
-    dragRef.current = { index, pointer: event.pointerId, moved: false }
+    setSelected(index)
+    dragRef.current = { index, pointer: event.pointerId, moved: false, resize: false }
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // Synthetic and already-released pointers cannot be captured.
+    }
+  }
+
+  function onResizeDown(event, index) {
+    event.stopPropagation()
+    event.preventDefault()
+    setSelected(index)
+    dragRef.current = { index, pointer: event.pointerId, moved: false, resize: true }
     try {
       event.currentTarget.setPointerCapture(event.pointerId)
     } catch {
@@ -94,10 +125,21 @@ export function FocusEditor({ images, focus, onChange, onClose }) {
   function onPointMove(event) {
     const drag = dragRef.current
     if (!drag || event.pointerId !== drag.pointer) return
+    const current = pointsRef.current[drag.index]
+    if (!current) return
+    if (drag.resize) {
+      const span = spanFromEvent(event, current)
+      if (span == null || Math.abs(span - spanOf(current)) < 0.004) return
+      drag.moved = true
+      const next = pointsRef.current.map((item, index) => (index === drag.index ? { ...item, span } : item))
+      pointsRef.current = next
+      setPoints(next)
+      return
+    }
     const point = pointFromEvent(event)
     if (!point) return
     drag.moved = true
-    const next = pointsRef.current.map((item, index) => (index === drag.index ? point : item))
+    const next = pointsRef.current.map((item, index) => (index === drag.index ? { ...item, x: point.x, y: point.y } : item))
     pointsRef.current = next
     setPoints(next)
   }
@@ -115,6 +157,7 @@ export function FocusEditor({ images, focus, onChange, onClose }) {
     if (!image) return
     const next = points.filter((_, cursor) => cursor !== index)
     setPoints(next)
+    setSelected((current) => (current === index ? 0 : current > index ? current - 1 : current))
     onChange(image.id, next)
   }
 
@@ -130,7 +173,7 @@ export function FocusEditor({ images, focus, onChange, onClose }) {
         <div className="focus-head">
           <div>
             <strong>Focus points</strong>
-            <p>{points.length} of 6. Click to add, drag to move.</p>
+            <p>Point 1 is the largest frame. Each point is a crop, and the ring is how much of that photo the frame shows.</p>
           </div>
           <button type="button" className="button" onClick={onClose}>
             Done
@@ -161,26 +204,47 @@ export function FocusEditor({ images, focus, onChange, onClose }) {
                 onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
               />
               {frame
-                ? points.map((point, index) => (
-                    <div
-                      key={index}
-                      className="focus-point"
-                      style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
-                      onPointerDown={(event) => onPointDown(event, index)}
-                      onPointerMove={onPointMove}
-                      onPointerUp={onPointUp}
-                      onPointerCancel={onPointUp}
-                    >
-                      <button
-                        type="button"
-                        aria-label="Remove focus point"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => remove(event, index)}
+                ? points.map((point, index) => {
+                    const span = spanOf(point)
+                    const ring = span * frame.width
+                    return (
+                      <div
+                        key={index}
+                        className={index === selected ? 'focus-point is-on' : 'focus-point'}
+                        style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
+                        onPointerDown={(event) => onPointDown(event, index)}
+                        onPointerMove={onPointMove}
+                        onPointerUp={onPointUp}
+                        onPointerCancel={onPointUp}
                       >
-                        ×
-                      </button>
-                    </div>
-                  ))
+                        <span className="focus-index">{index + 1}</span>
+                        {index === selected ? (
+                          <>
+                            <span className="focus-ring" style={{ width: ring, height: ring }} />
+                            <button
+                              type="button"
+                              className="focus-handle"
+                              aria-label="Show more or less around this point"
+                              style={{ left: `calc(50% + ${ring / 2}px)` }}
+                              onPointerDown={(event) => onResizeDown(event, index)}
+                              onPointerMove={onPointMove}
+                              onPointerUp={onPointUp}
+                              onPointerCancel={onPointUp}
+                            />
+                          </>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="focus-remove"
+                          aria-label="Remove focus point"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => remove(event, index)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )
+                  })
                 : null}
             </div>
           ) : (

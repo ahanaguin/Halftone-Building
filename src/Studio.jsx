@@ -21,12 +21,14 @@ import {
   mergeAt,
   moveKey,
   sameSections,
+  sectionAfterEdit,
   snapBoundary,
   splitAt,
   withBoundary,
   workingSections,
 } from './sectionEdit.js'
-import { GUTTER_DEFAULT, PANEL_COUNT, collageCount, prepareCollage } from './collageField.js'
+import { PANEL_COUNT, collageCount, collageImageIds, prepareCollage } from './collageField.js'
+import { prepareMosaic } from './mosaicField.js'
 import { FocusEditor } from './FocusEditor.jsx'
 import { DOT_DENSITY, DOT_SIZE_DEFAULT } from './halftoneField.js'
 import { INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
@@ -291,13 +293,8 @@ export function Studio() {
   useEffect(() => {
     const list = workingSections(track, studio)
     if (!list.length) return
-    setSection((current) => {
-      if (!current) return list[0]
-      const exact = list.find((item) => item.label === current.label && Math.abs(item.start - current.start) < 0.0005 && Math.abs(item.end - current.end) < 0.0005)
-      if (exact) return exact
-      const midpoint = Math.min(Math.max((current.start + current.end) / 2, list[0].start), list[list.length - 1].end - 0.001)
-      return sectionAt(list, midpoint) || list[0]
-    })
+    setSection((current) => sectionAfterEdit(current, list) || list[0])
+    setPicked((current) => (current ? sectionAfterEdit(current, list) : current))
   }, [studio.sections, track])
 
   useEffect(() => {
@@ -695,7 +692,12 @@ export function Studio() {
   }
 
   function saveFocus(imageId, points) {
-    const next = points.slice(0, 6).map((point) => ({ x: point.x, y: point.y }))
+    const next = points.slice(0, 6).map((point) => {
+      const saved = { x: point.x, y: point.y }
+      const span = Number(point.span)
+      if (Number.isFinite(span) && span > 0) saved.span = Math.min(0.95, Math.max(0.12, span))
+      return saved
+    })
     editStudio((current) => {
       const previous = current.focus?.[imageId]
       if (JSON.stringify(previous || []) === JSON.stringify(next)) return current
@@ -715,6 +717,10 @@ export function Studio() {
     writeSection({ contrast: Number(event.target.value) })
   }
 
+  function onShimmer(event) {
+    writeSection({ shimmer: Number(event.target.value) })
+  }
+
   function onComposition(event) {
     setArrangementAck(null)
     setCompositionAck(null)
@@ -722,7 +728,11 @@ export function Studio() {
   }
 
   function modeOf(edit) {
-    if (studio.style === 'image') return edit?.composition === 'collage' ? 'collage' : 'halftone'
+    if (studio.style === 'image') {
+      if (edit?.composition === 'collage') return 'collage'
+      if (edit?.composition === 'mosaic') return 'mosaic'
+      return 'halftone'
+    }
     return ['free', 'mirror', 'quad', 'radial'].includes(edit?.composition) ? edit.composition : 'auto'
   }
 
@@ -741,7 +751,7 @@ export function Studio() {
       }
       return changed ? { ...current, edits } : current
     })
-    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', halftone: 'Halftone', collage: 'Collage' }[mode]
+    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', halftone: 'Halftone', collage: 'Collage', mosaic: 'Mosaic' }[mode]
     setCompositionAck(mode)
     showToast(`${name} applied to all sections.`)
   }
@@ -826,10 +836,37 @@ export function Studio() {
     return list[Math.max(0, index) % list.length].id
   }
 
+  function collageSpec(source = studio) {
+    return {
+      images: (source.images || []).map((image) => image.url),
+      imageIds: (source.images || []).map((image) => image.id),
+      edits: source.edits,
+      sections: workingSections(track, source),
+      imageSwitch: source.imageSwitch || 'section',
+    }
+  }
+
+  function sectionImageIds(item = section, source = studio) {
+    if (!item) return []
+    return collageImageIds(collageSpec(source), item)
+  }
+
   function assignImage(id) {
     if (!section) return
     setImageAck(null)
     writeSection({ image: id })
+  }
+
+  function toggleCollageImage(id) {
+    if (!section) return
+    const order = (studio.images || []).map((image) => image.id)
+    const current = sectionImageIds()
+    const next = current.includes(id)
+      ? current.filter((item) => item !== id)
+      : order.filter((item) => current.includes(item) || item === id)
+    if (!next.length) return
+    setImageAck(null)
+    writeSection({ images: next })
   }
 
   function applyImage() {
@@ -850,6 +887,27 @@ export function Studio() {
     })
     setImageAck(id)
     showToast('Image applied to all sections.')
+  }
+
+  function applyCollageImages() {
+    if (!section) return
+    const picked = sectionImageIds()
+    if (!picked.length) return
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        const same = Array.isArray(previous.images) && previous.images.length === picked.length && previous.images.every((itemId, index) => itemId === picked[index])
+        if (same) continue
+        edits[key] = { ...previous, images: picked }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setImageAck(picked.join('|'))
+    showToast('Images applied to all sections.')
   }
 
   function onImageSwitch(event) {
@@ -968,6 +1026,7 @@ export function Studio() {
           isHex(edit.background) ||
           isHex(edit.dots) ||
           edit.image ||
+          edit.images?.length ||
           edit.contrast != null ||
           edit.palette?.swatches?.length ||
           edit.roundness != null ||
@@ -975,6 +1034,8 @@ export function Studio() {
           edit.print != null ||
           edit.mono ||
           edit.grain ||
+          edit.flow === false ||
+          edit.shimmer != null ||
           (edit.composition && edit.composition !== 'auto')),
     )
     if (!edited) {
@@ -1078,15 +1139,19 @@ export function Studio() {
   const composition = imageOn
     ? sectionEdit.composition === 'collage'
       ? 'collage'
-      : 'halftone'
+      : sectionEdit.composition === 'mosaic'
+        ? 'mosaic'
+        : 'halftone'
     : ['free', 'mirror', 'quad', 'radial'].includes(sectionEdit.composition)
       ? sectionEdit.composition
       : 'auto'
   const collageOn = imageOn && composition === 'collage'
+  const mosaicOn = imageOn && composition === 'mosaic'
   const compositionOptions = imageOn
     ? [
         { id: 'halftone', label: 'Halftone' },
         { id: 'collage', label: 'Collage' },
+        { id: 'mosaic', label: 'Mosaic' },
       ]
     : [
         { id: 'auto', label: 'Auto' },
@@ -1096,7 +1161,8 @@ export function Studio() {
         { id: 'radial', label: 'Radial' },
       ]
   const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
-  const sizeValue = sectionEdit.size ?? (collageOn ? GUTTER_DEFAULT : imageOn ? DOT_SIZE_DEFAULT : 50)
+  const sizeValue = sectionEdit.size ?? (mosaicOn ? 32 : imageOn ? DOT_SIZE_DEFAULT : 50)
+  const shimmerValue = sectionEdit.shimmer ?? 50
   const countValue = collageOn
     ? collageCount({ edits: studio.edits, seeds: studio.seeds }, section)
     : imageOn
@@ -1137,7 +1203,11 @@ export function Studio() {
         return hex.toLowerCase() === sectionDots.toLowerCase()
       }),
   )
-  const imageUniform = Boolean(sections.length && images.length && sections.every((item) => imageIdFor(item) === selectedImage))
+  const collagePicks = collageOn && section ? sectionImageIds() : []
+  const sameImageList = (left, right) => left.length === right.length && left.every((id, index) => id === right[index])
+  const imageUniform = collageOn
+    ? Boolean(sections.length && collagePicks.length && sections.every((item) => sameImageList(sectionImageIds(item), collagePicks)))
+    : Boolean(sections.length && images.length && sections.every((item) => imageIdFor(item) === selectedImage))
   if (compositionAck != null && !compositionUniform) setCompositionAck(null)
   if (backgroundAck != null && !backgroundUniform) setBackgroundAck(null)
   if (dotsAck != null && !dotsUniform) setDotsAck(null)
@@ -1145,7 +1215,7 @@ export function Studio() {
   const compositionApplied = compositionAck === composition && compositionUniform
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
   const dotsApplied = dotsAck === sectionDots.toLowerCase() && dotsUniform
-  const imageApplied = imageAck === selectedImage && imageUniform
+  const imageApplied = (collageOn ? imageAck === collagePicks.join('|') : imageAck === selectedImage) && imageUniform
   const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
   const backgroundChoices = backgroundChoicesOf(studio, activePalette)
   const sectionIndex = sections.findIndex((item) => sameSection(section, item))
@@ -1323,15 +1393,20 @@ export function Studio() {
     const before = drag.sections[drag.index]
     if (Math.abs(snapped - before.start) < 0.0005) {
       syncStudio(() => drag.origin)
+      if (drag.selectedIndex >= 0) setSection(drag.sections[drag.selectedIndex])
+      if (drag.pickedIndex >= 0) setPicked(drag.sections[drag.pickedIndex])
       return
     }
     const next = withBoundary(drag.sections, drag.index, snapped)
+    const rightKey = sectionKey(next[drag.index])
     syncStudio(() => ({
       ...drag.origin,
       sections: next,
-      edits: moveKey(drag.origin.edits, sectionKey(before), sectionKey(next[drag.index])),
-      seeds: moveKey(drag.origin.seeds, sectionKey(before), sectionKey(next[drag.index])),
+      edits: moveKey(drag.origin.edits, sectionKey(before), rightKey),
+      seeds: moveKey(drag.origin.seeds, sectionKey(before), rightKey),
     }))
+    if (drag.selectedIndex >= 0) setSection(next[drag.selectedIndex])
+    if (drag.pickedIndex >= 0) setPicked(next[drag.pickedIndex])
   }
 
   function onBoundaryDown(event, index) {
@@ -1349,6 +1424,8 @@ export function Studio() {
       index,
       origin: studioRef.current,
       sections: list,
+      selectedIndex: list.findIndex((item) => sameSection(item, section)),
+      pickedIndex: list.findIndex((item) => sameSection(item, picked)),
       limits,
       done: false,
       moved: false,
@@ -1378,6 +1455,7 @@ export function Studio() {
   useEffect(() => {
     if (studio.style !== 'image') return undefined
     prepareCollage({ style: 'image', images: (studio.images || []).map((image) => image.url) })
+    prepareMosaic({ style: 'image', images: (studio.images || []).map((image) => image.url) })
     return undefined
   }, [studio.style, studio.images])
 
@@ -1411,7 +1489,7 @@ export function Studio() {
                 onPointerUp={onPlaceUp}
                 onPointerCancel={onPlaceUp}
                 role={track && visualOn ? 'img' : undefined}
-                aria-label={track && collageOn ? 'Collage of the image' : track && imageOn ? 'Halftone of the image' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
               />
             )}
             {track && visualOn ? null : (
@@ -1438,10 +1516,12 @@ export function Studio() {
           <strong>Why it looks like this</strong>
           <p>
             {collageOn
-              ? 'Panels hold different crops of the photo and drift slowly. A beat cuts one panel to a new detail, bass draws the frames in, and a new section eases them into a fresh arrangement.'
-              : imageOn
-                ? 'Most of the grid stays a fine dot pattern. Soft zones drift across and reveal the photo where they pass. A strong bass hit fuses the darkest dots for a moment, and a beat sends a ripple through the grid.'
-                : explainPoster(poster)}
+              ? 'The frames share the photos you picked, as evenly as they can. The largest frame follows point 1 on the first photo, and the speed slider changes how quickly a smaller frame cuts to another point.'
+              : mosaicOn
+                ? 'The photo is rebuilt from small tiles that follow its shapes. A soft light moves across them: bass speeds it up, a beat catches a cluster, and a new photo arrives one tile at a time.'
+                : imageOn
+                  ? 'The grid is a halftone of the whole photo. Soft zones drift across and sharpen it where they pass. A strong bass hit fuses the darkest dots for a moment, and a beat sends a ripple through the grid.'
+                  : explainPoster(poster)}
           </p>
         </div>
 
@@ -1612,16 +1692,16 @@ export function Studio() {
             </div>
             <div className="image-grid">
               {images.map((image) => {
-                const chosen = image.id === selectedImage
+                const chosen = collageOn ? collagePicks.includes(image.id) : image.id === selectedImage
                 return (
                   <div className={chosen ? 'image-slot is-selected' : 'image-slot'} key={image.id}>
                     <button
                       type="button"
                       className="image-pick"
                       aria-pressed={chosen}
-                      aria-label={`Use ${image.name || 'image'} for this section`}
+                      aria-label={collageOn ? `Use ${image.name || 'image'} in this section` : `Use ${image.name || 'image'} for this section`}
                       disabled={!section}
-                      onClick={() => assignImage(image.id)}
+                      onClick={() => (collageOn ? toggleCollageImage(image.id) : assignImage(image.id))}
                     >
                       <img src={image.url} alt="" />
                     </button>
@@ -1650,22 +1730,26 @@ export function Studio() {
                 type="button"
                 className={imageApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
                 disabled={!section || !sections.length}
-                onClick={applyImage}
+                onClick={collageOn ? applyCollageImages : applyImage}
               >
-                {imageApplied ? 'Applied to all sections ✓' : 'Apply image to all sections'}
+                {imageApplied ? 'Applied to all sections ✓' : collageOn ? 'Apply images to all sections' : 'Apply image to all sections'}
               </button>
             ) : (
               <p className="section-note">
-                {collageOn ? 'Add a photo. Close-ups land on the most detailed parts.' : 'Add a photo. Dark areas become larger dots.'}
+                {collageOn ? 'Add photos, then choose which ones this section uses. Point 1 on the first chosen photo fills the largest frame.' : mosaicOn ? 'Add a photo. The mosaic follows its shapes, and focus points mark the subject.' : 'Add a photo. Dark areas become larger dots.'}
               </p>
             )}
-            <p className="side-label">Switch images on</p>
-            <label className="style-field">
-              <select className="style-select" aria-label="Switch images on" value={studio.imageSwitch || 'section'} onChange={onImageSwitch}>
-                <option value="section">Section</option>
-                <option value="off">Off</option>
-              </select>
-            </label>
+            {collageOn ? null : (
+              <>
+                <p className="side-label">Switch images on</p>
+                <label className="style-field">
+                  <select className="style-select" aria-label="Switch images on" value={studio.imageSwitch || 'section'} onChange={onImageSwitch}>
+                    <option value="section">Section</option>
+                    <option value="off">Off</option>
+                  </select>
+                </label>
+              </>
+            )}
           </>
         ) : null}
 
@@ -1695,7 +1779,7 @@ export function Studio() {
             >
               {compositionApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
-            {imageOn && !collageOn ? (
+            {imageOn && !collageOn && !mosaicOn ? (
               <>
                 <p className="side-label">Dots</p>
                 <div className="swatches background-swatches" role="listbox" aria-label="Dots">
@@ -1797,6 +1881,27 @@ export function Studio() {
             >
               {backgroundApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
+            {mosaicOn ? (
+              <>
+                <div className="background-row">
+                  <p className="side-label">Follow image flow</p>
+                  <button
+                    type="button"
+                    className="shine-switch"
+                    role="switch"
+                    aria-checked={sectionEdit.flow !== false}
+                    aria-label="Follow image flow"
+                    disabled={!section}
+                    onClick={() => writeSection({ flow: sectionEdit.flow === false })}
+                  >
+                    <span />
+                  </button>
+                </div>
+                <button type="button" className="button-redo apply-all" onClick={() => setFocusOpen(true)}>
+                  Edit focus points
+                </button>
+              </>
+            ) : null}
             {collageOn ? (
               <>
                 <div className="background-row">
@@ -1866,39 +1971,43 @@ export function Studio() {
           </>
         )}
 
-        <div className="slider-labels">
-          <span>Warm</span>
-          <span>Cool</span>
-        </div>
-        <input
-          className="range"
-          type="range"
-          min="0"
-          max="100"
-          value={warmth}
-          onPointerDown={startSlide}
-          onPointerUp={finishSlide}
-          onPointerCancel={finishSlide}
-          onChange={onWarmth}
-          aria-label="Warm to cool"
-        />
+        {collageOn || mosaicOn ? null : (
+          <>
+            <div className="slider-labels">
+              <span>Warm</span>
+              <span>Cool</span>
+            </div>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="100"
+              value={warmth}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={onWarmth}
+              aria-label="Warm to cool"
+            />
 
-        <div className="slider-labels">
-          <span>Dark</span>
-          <span>Light</span>
-        </div>
-        <input
-          className="range"
-          type="range"
-          min="0"
-          max="100"
-          value={lightness}
-          onPointerDown={startSlide}
-          onPointerUp={finishSlide}
-          onPointerCancel={finishSlide}
-          onChange={onLightness}
-          aria-label="Dark to light"
-        />
+            <div className="slider-labels">
+              <span>Dark</span>
+              <span>Light</span>
+            </div>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="100"
+              value={lightness}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={onLightness}
+              aria-label="Dark to light"
+            />
+          </>
+        )}
 
         {shapesOn ? (
           <>
@@ -1956,21 +2065,79 @@ export function Studio() {
 
         {section && visualOn ? (
           <div className="section-tools">
-            <div className="slider-labels">
-              <span>{collageOn ? 'Gutter size' : imageOn ? 'Max dot size' : 'Shape size'}</span>
-            </div>
-            <input
-              className="range"
-              type="range"
-              min="0"
-              max="100"
-              value={sizeValue}
-              onPointerDown={startSlide}
-              onPointerUp={finishSlide}
-              onPointerCancel={finishSlide}
-              onChange={onSectionSize}
-              aria-label={collageOn ? 'Gutter size' : imageOn ? 'Max dot size' : 'Shape size'}
-            />
+            {mosaicOn ? (
+              <>
+                <p className="side-label">Tile size</p>
+                <div className="slider-labels">
+                  <span>Small</span>
+                  <span>Large</span>
+                </div>
+                <input
+                  className="range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={Math.min(100, Math.max(0, sectionEdit.count ?? 38))}
+                  onPointerDown={startSlide}
+                  onPointerUp={finishSlide}
+                  onPointerCancel={finishSlide}
+                  onChange={onSectionCount}
+                  aria-label="Tile size"
+                />
+                <div className="slider-labels">
+                  <span>Grout width</span>
+                </div>
+                <input
+                  className="range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={sizeValue}
+                  onPointerDown={startSlide}
+                  onPointerUp={finishSlide}
+                  onPointerCancel={finishSlide}
+                  onChange={onSectionSize}
+                  aria-label="Grout width"
+                />
+                <p className="side-label">Shimmer</p>
+                <div className="slider-labels">
+                  <span>Subtle</span>
+                  <span>Strong</span>
+                </div>
+                <input
+                  className="range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={shimmerValue}
+                  onPointerDown={startSlide}
+                  onPointerUp={finishSlide}
+                  onPointerCancel={finishSlide}
+                  onChange={onShimmer}
+                  aria-label="Shimmer"
+                />
+              </>
+            ) : (
+              <>
+            {collageOn ? null : (
+              <>
+                <div className="slider-labels">
+                  <span>{imageOn ? 'Max dot size' : 'Shape size'}</span>
+                </div>
+                <input
+                  className="range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={sizeValue}
+                  onPointerDown={startSlide}
+                  onPointerUp={finishSlide}
+                  onPointerCancel={finishSlide}
+                  onChange={onSectionSize}
+                  aria-label={imageOn ? 'Max dot size' : 'Shape size'}
+                />
+              </>
+            )}
             <div className="slider-labels">
               <span>{collageOn ? 'Number of panels' : imageOn ? 'Dot density' : 'Number of shapes'}</span>
               <span>{countValue}</span>
@@ -2027,6 +2194,8 @@ export function Studio() {
                   })}
                 </div>
                 <p className="section-note">Drag the picture to move the main shape.</p>
+              </>
+            )}
               </>
             )}
           </div>
@@ -2246,7 +2415,7 @@ export function Studio() {
                 onPointerUp={onPlaceUp}
                 onPointerCancel={onPlaceUp}
                 role={track && visualOn ? 'img' : undefined}
-                aria-label={track && collageOn ? 'Collage of the image' : track && imageOn ? 'Halftone of the image' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
               />
             </div>,
             document.body,
@@ -2254,7 +2423,7 @@ export function Studio() {
         : null}
       {focusOpen
         ? createPortal(
-            <FocusEditor images={images} focus={studio.focus || {}} onChange={saveFocus} onClose={() => setFocusOpen(false)} />,
+            <FocusEditor images={collageOn ? images.filter((image) => collagePicks.includes(image.id)) : images} focus={studio.focus || {}} onChange={saveFocus} onClose={() => setFocusOpen(false)} />,
             document.body,
           )
         : null}

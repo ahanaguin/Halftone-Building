@@ -1,4 +1,4 @@
-import { hexToRgb, hslToHex, rgbToHsl } from './palette.js'
+import { hexToRgb } from './palette.js'
 import { biggestDropTimes } from './metaballs.js'
 import { metricsAt } from './profileTrack.js'
 import { INK_BLACK, PAPER, labelKind, mulberry32, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
@@ -73,10 +73,14 @@ void main() {
     if (dotUv.x < 0.0 || dotUv.y < 0.0 || dotUv.x > 1.0 || dotUv.y > 1.0) continue;
     float lum = texture(uLum, dotUv).r;
     float curved = clamp((lum - 0.5) * uContrast + 0.5, 0.0, 1.0);
-    float darkness = pow(clamp(1.0 - curved, 0.0, 1.0), 0.9);
-    float pictured = mix(uMinR, uMaxR * mix(0.2, 1.0, darkness), uReveal);
-    float radius = mix(uMinR, pictured, zone);
-    radius *= 1.0 + zone * smoothstep(0.78, 0.96, darkness) * uFuse * 0.8 + ripple * 0.22;
+    float darkness = pow(clamp(1.0 - curved, 0.0, 1.0), 0.8);
+    float tone = pow(clamp(darkness, 0.0, 1.0), 0.72);
+    float fullScale = mix(0.1, 0.92, tone);
+    float quietScale = mix(0.18, fullScale, 0.76);
+    float full = mix(uMinR, uMaxR * fullScale, uReveal);
+    float quiet = mix(uMinR, uMaxR * quietScale, uReveal);
+    float radius = mix(quiet, full, zone);
+    radius *= 1.0 + zone * smoothstep(0.86, 0.98, darkness) * uFuse * 0.42 + ripple * 0.16;
     vec2 delta = p - center;
     float limit = max(radius * radius, 0.0001);
     float falloff = clamp(1.0 - dot(delta, delta) / limit, 0.0, 1.0);
@@ -204,26 +208,8 @@ function dotsAt(spec, time) {
   return sectionDots(spec, sectionAt(sections, now) || sections[0])
 }
 
-function darkGround(hex) {
-  const [red, green, blue] = hexToRgb(hex)
-  const [hue, saturation, lightness] = rgbToHsl(red, green, blue)
-  return hslToHex(hue, Math.min(saturation, 0.62), lightness > 0.2 ? 0.08 : lightness)
-}
-
 export function halftoneColors(spec, time) {
-  const paper = hexOf(spec.background, PAPER)
-  const ink = dotsAt(spec, time)
-  if (!invertedAt(spec, time)) return { ink, paper }
-  return { ink: paper, paper: darkGround(ink) }
-}
-
-function invertedAt(spec, time) {
-  const sections = spec.sections || []
-  const section = sectionAt(sections, time || 0)
-  if (!section) return false
-  if (labelKind(section.label) === 'Drop') return true
-  const drops = biggestDropTimes(spec)
-  return drops.some((hit) => hit >= section.start - 0.04 && hit <= (time || 0) + 0.001)
+  return { ink: dotsAt(spec, time), paper: hexOf(spec.background, PAPER) }
 }
 
 function densityOf(spec, time) {
@@ -559,6 +545,53 @@ function bufferSize(ctx, width, height) {
   return { bufferWidth, bufferHeight, scaleX, scaleY }
 }
 
+function smoothstep(edge0, edge1, value) {
+  const span = Math.max(1e-4, edge1 - edge0)
+  const t = clamp((value - edge0) / span, 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+function zoneAt(state, x, y, width, height) {
+  let zone = state?.bloom || 0
+  const shortSide = Math.min(width, height)
+  const frameX = width / shortSide
+  const frameY = height / shortSide
+  const reach = Math.max(state?.reach || 0.2, 0.001)
+  for (const item of state?.zones || []) {
+    const dist = Math.hypot((x / width - item.x) * frameX, (y / height - item.y) * frameY)
+    zone = Math.max(zone, 1 - smoothstep(reach * 0.7, reach, dist))
+  }
+  return clamp(zone, 0, 1)
+}
+
+function rippleAt(state, x, y, width, height, time) {
+  let ripple = 0
+  const shortSide = Math.min(width, height)
+  const frameX = width / shortSide
+  const frameY = height / shortSide
+  for (const item of state?.ripples || []) {
+    const age = Math.max(0, time - item.born)
+    const weight = Math.max(0, 1 - age / 0.8)
+    if (weight <= 0) continue
+    const dist = Math.hypot((x / width - item.x) * frameX, (y / height - item.y) * frameY)
+    const band = Math.exp(-(((dist - age * 0.95) / 0.045) ** 2))
+    ripple = Math.max(ripple, band * weight)
+  }
+  return ripple
+}
+
+function dotRadius(minR, maxR, darkness, reveal, zone, fuse, ripple) {
+  const tone = darkness ** 0.72
+  const fullScale = 0.1 + (0.92 - 0.1) * tone
+  const quietScale = 0.18 + (fullScale - 0.18) * 0.76
+  const shown = clamp(reveal, 0, 1)
+  const full = minR + (maxR * fullScale - minR) * shown
+  const quiet = minR + (maxR * quietScale - minR) * shown
+  const radius = quiet + (full - quiet) * clamp(zone, 0, 1)
+  const fuseBoost = clamp(zone, 0, 1) * smoothstep(0.86, 0.98, darkness) * clamp(fuse, 0, 1) * 0.42
+  return Math.max(0.5, radius * (1 + fuseBoost + ripple * 0.16))
+}
+
 function paintCPU(ctx, spec, state, width, height) {
   const { ink, paper } = halftoneColors(spec, spec.time || 0)
   const density = densityOf(spec, spec.time || 0)
@@ -586,11 +619,13 @@ function paintCPU(ctx, spec, state, width, height) {
         const py = clamp(Math.floor((cy / height) * field.height), 0, field.height - 1)
         const lum = field.bytes[py * field.width + px] / 255
         const curved = clamp((lum - 0.5) * contrast + 0.5, 0, 1)
-        darkness = (1 - curved) ** 0.9
+        darkness = (1 - curved) ** 0.8
       }
-      const pictured = minR + (maxR * (0.2 + 0.8 * darkness) - minR) * state.reveal
+      const zone = zoneAt(state, cx, cy, width, height)
+      const ripple = rippleAt(state, cx, cy, width, height, spec.time || 0)
+      const radius = dotRadius(minR, maxR, darkness, state.reveal, zone, state.fuse, ripple)
       ctx.beginPath()
-      ctx.arc(cx, cy, Math.max(0.5, pictured), 0, Math.PI * 2)
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2)
       ctx.fill()
     }
   }

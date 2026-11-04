@@ -95,29 +95,29 @@ export function Shell() {
         aria-hidden={!open}
         inert={!open}
       >
-        <div className="sidebar-header">
-          <button
-            ref={closeRef}
-            type="button"
-            className="icon-button"
-            aria-label="Close"
-            onClick={closeMenu}
-          >
-            <Caret />
-          </button>
-        </div>
-        <nav className="nav" onClick={closeMenu}>
-          <NavItems items={PRIMARY} />
-        </nav>
-        <div className="sidebar-bottom">
-          <nav className="nav nav-bottom" onClick={closeMenu}>
-            <NavItems items={SECONDARY} />
+        <div className="sidebar-panel">
+          <div className="sidebar-header">
+            <button
+              ref={closeRef}
+              type="button"
+              className="icon-button"
+              aria-label="Close"
+              onClick={closeMenu}
+            >
+              <Caret />
+            </button>
+          </div>
+          <nav className="nav" onClick={closeMenu}>
+            <NavItems items={PRIMARY} />
           </nav>
-          <p className="privacy">
-            Your audio and images stay on this device
-            <br />
-            Halftone doesn't check ownership of uploaded files.
-          </p>
+          <div className="sidebar-bottom">
+            <nav className="nav nav-bottom" onClick={closeMenu}>
+              <NavItems items={SECONDARY} />
+            </nav>
+            <p className="privacy">
+              Your audio and images stay on this device. Halftone doesn't check ownership of uploaded files.
+            </p>
+          </div>
         </div>
       </aside>
 
