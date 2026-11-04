@@ -113,7 +113,11 @@ export function Shell() {
           <nav className="nav nav-bottom" onClick={closeMenu}>
             <NavItems items={SECONDARY} />
           </nav>
-          <p className="privacy">Your audio and images stay on this device</p>
+          <p className="privacy">
+            Your audio and images stay on this device
+            <br />
+            Halftone doesn't check ownership of uploaded files.
+          </p>
         </div>
       </aside>
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { frameInput, paintFrame } from './drawFrame.js'
+import { prepareCollage } from './collageField.js'
 import { prepareHalftone } from './halftoneField.js'
 import {
   FILM_FPS,
@@ -49,7 +50,7 @@ function Artwork({ aspect, spec }) {
     const canvas = ref.current
     if (!canvas || !spec) return undefined
     let cancel = false
-    prepareHalftone(spec).then(() => {
+    Promise.all([prepareHalftone(spec), prepareCollage(spec)]).then(() => {
       if (cancel || ref.current !== canvas) return
       canvas.width = logical.width
       canvas.height = logical.height

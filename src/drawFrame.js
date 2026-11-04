@@ -1,5 +1,6 @@
 import { paletteColors, swatchHex } from './palette.js'
 import { frameMode, paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
+import { imageComposition, paintCollage } from './collageField.js'
 import { paintHalftone } from './halftoneField.js'
 import { paintGrid } from './gridField.js'
 import { metricsAt } from './profileTrack.js'
@@ -52,7 +53,10 @@ export function paintFrame(ctx, spec) {
   ctx.save()
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
-  if (spec.style === 'image') paintHalftone(ctx, spec)
+  if (spec.style === 'image') {
+    if (imageComposition(spec) === 'collage') paintCollage(ctx, spec)
+    else paintHalftone(ctx, spec)
+  }
   else if (frameMode(spec) === 'grid') paintGrid(ctx, spec)
   else paintMetaballs(ctx, spec)
   if (spec.style !== 'image') paintGrain(ctx, width, height)
@@ -90,6 +94,7 @@ export function frameInput({ track, studio, profile, time, width, height }) {
     images: (studio.images || []).filter((image) => image.url).map((image) => image.url),
     imageIds: (studio.images || []).filter((image) => image.url).map((image) => image.id),
     imageSwitch: studio.imageSwitch || 'section',
+    focus: studio.focus || {},
     sectionLabel: section?.label || '',
     loud: metrics.loud,
     bass: metrics.bass,

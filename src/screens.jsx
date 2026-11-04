@@ -24,6 +24,9 @@ function Screen({ title, lede, action, to, back, backTo }) {
   )
 }
 
+export const RIGHTS_NOTE =
+  "Only upload music and images you own or have permission to use. You're responsible for what you create and share with Halftone."
+
 export function Landing() {
   return (
     <main className="screen screen-landing">
@@ -37,6 +40,7 @@ export function Landing() {
       <Link className="button" to={hasCalibration() ? '/upload' : '/calibrate'}>
         New visual
       </Link>
+      <p className="rights-note">{RIGHTS_NOTE}</p>
     </main>
   )
 }

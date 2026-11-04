@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { SHORT_TRACK_MESSAGE, analyzeTrack } from './analyzeTrack.js'
+import { RIGHTS_NOTE } from './screens.jsx'
 import { useTrack } from './track.jsx'
 
 function sectionStyle(section, duration) {
@@ -293,6 +294,7 @@ export function Upload() {
             Pick a style
           </Link>
         </div>
+        <p className="rights-note">{RIGHTS_NOTE}</p>
       </div>
     </main>
   )
