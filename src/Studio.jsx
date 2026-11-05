@@ -33,7 +33,7 @@ import { FocusEditor } from './FocusEditor.jsx'
 import { DOT_DENSITY, DOT_SIZE_DEFAULT } from './halftoneField.js'
 import { BLOOM_COUNT, COLOR_MODES, DEFAULT_DOT_COLOR, MAX_DOT_COLORS, bloomDotColorsOf, colorModeOf, explainBloom } from './bloomField.js'
 import { DEFAULT_ORB_COLORS, ORB_COUNT, explainOrb, orbDotColorsOf } from './orbField.js'
-import { CHROME_COUNT, CHROME_GREY, explainChrome } from './chromeField.js'
+import { CHROME_COUNT, CHROME_GREY, CHROME_METALS, CHROME_SILVER, MAX_METALS, explainChrome } from './chromeField.js'
 import { INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
@@ -68,6 +68,30 @@ function backgroundChoicesOf(studio, paletteSource) {
   })
   return choices
 }
+
+function metalChoicesOf(studio, paletteSource) {
+  const extras = []
+  for (const hex of studio.metals || []) {
+    if (!isHex(hex)) continue
+    if (extras.some((item) => item.toLowerCase() === hex.toLowerCase())) continue
+    extras.push(hex)
+  }
+  const source = paletteSource?.swatches || studio.palette?.swatches || []
+  const palette = source.map((swatch) => swatchHex(swatch))
+  const room = Math.max(0, MAX_METALS - CHROME_METALS.length - extras.length)
+  const choices = CHROME_METALS.map((item) => ({ ...item }))
+  palette.slice(0, room).forEach((hex, index) => {
+    if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
+    choices.push({ hex, label: `Color ${index + 1}` })
+  })
+  extras.forEach((hex) => {
+    if (choices.length >= MAX_METALS) return
+    if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
+    choices.push({ hex, label: 'Custom color', custom: true })
+  })
+  return choices
+}
+
 const STYLES = [
   { id: 'shapes', label: 'Liquid', ready: true },
   { id: 'bloom', label: 'Bloom', ready: true },
@@ -162,6 +186,7 @@ export function Studio() {
   const [filledAck, setFilledAck] = useState(null)
   const [dotColorAck, setDotColorAck] = useState(null)
   const [backgroundAck, setBackgroundAck] = useState(null)
+  const [metalAck, setMetalAck] = useState(null)
   const [dotsAck, setDotsAck] = useState(null)
   const [groutAck, setGroutAck] = useState(null)
   const [imageAck, setImageAck] = useState(null)
@@ -907,6 +932,40 @@ export function Studio() {
     showToast('Background applied to all sections.')
   }
 
+  function applyMetal() {
+    if (!sections.length) return
+    const hex = isHex(studio.edits?.[activeKey]?.metal) ? studio.edits[activeKey].metal : CHROME_SILVER
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        if ((previous.metal || '').toLowerCase() === hex.toLowerCase()) continue
+        edits[key] = { ...previous, metal: hex }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setMetalAck(hex.toLowerCase())
+    showToast('Metal color applied to all sections.')
+  }
+
+  function commitMetal(hex, previous, custom) {
+    if (!isHex(hex)) return
+    setMetalAck(null)
+    editStudio((current) => {
+      let metals = [...(current.metals || [])]
+      const choices = metalChoicesOf(current, activePalette)
+      const known = choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())
+      if (custom && previous && previous.toLowerCase() !== hex.toLowerCase()) metals = metals.map((item) => (item.toLowerCase() === previous.toLowerCase() ? hex : item))
+      else if (!known && choices.length < MAX_METALS) metals.push(hex)
+      const edits = { ...(current.edits || {}) }
+      if (activeKey) edits[activeKey] = { ...(edits[activeKey] || {}), metal: hex }
+      return { ...current, metals, edits }
+    })
+  }
+
   function applyDots() {
     if (!sections.length) return
     const hex = isHex(studio.edits?.[activeKey]?.dots) ? studio.edits[activeKey].dots : INK_BLACK
@@ -1154,6 +1213,7 @@ export function Studio() {
     }
     else if (picker.target === 'dots') commitDots(picker.hex, picker.previous, picker.custom)
     else if (picker.target === 'grout') commitGrout(picker.hex, picker.previous, picker.custom)
+    else if (picker.target === 'metal') commitMetal(picker.hex, picker.previous, picker.custom)
     else commitBackground(picker.hex, picker.previous, picker.custom)
     setPicker(null)
   }
@@ -1210,6 +1270,8 @@ export function Studio() {
           edit.x ||
           edit.y ||
           isHex(edit.background) ||
+          isHex(edit.metal) ||
+          edit.tint != null ||
           isHex(edit.dots) ||
           edit.image ||
           edit.images?.length ||
@@ -1290,7 +1352,7 @@ export function Studio() {
   useEffect(() => {
     if (!picker) return undefined
     function finish() {
-      const field = picker.target === 'background' ? 'background' : picker.target === 'dots' ? 'dots' : picker.target === 'grout' ? 'grout' : ''
+      const field = picker.target === 'background' ? 'background' : picker.target === 'dots' ? 'dots' : picker.target === 'grout' ? 'grout' : picker.target === 'metal' ? 'metal' : ''
       if (picker.target === 'dotColor' && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
         const revert = picker.revert
         editStudio((current) => {
@@ -1438,6 +1500,15 @@ export function Studio() {
         return hex.toLowerCase() === sectionBackground.toLowerCase()
       }),
   )
+  const sectionMetal = isHex(sectionEdit.metal) ? sectionEdit.metal : CHROME_SILVER
+  const metalUniform = Boolean(
+    sections.length &&
+      sections.every((item) => {
+        const saved = studio.edits?.[sectionKey(item)]?.metal
+        const hex = isHex(saved) ? saved : CHROME_SILVER
+        return hex.toLowerCase() === sectionMetal.toLowerCase()
+      }),
+  )
   const sectionGrout = isHex(sectionEdit.grout) ? sectionEdit.grout : INK_BLACK
   const groutUniform = Boolean(
     sections.length &&
@@ -1479,6 +1550,7 @@ export function Studio() {
   if (filledAck != null && !filledUniform) setFilledAck(null)
   if (dotColorAck != null && !bloomColorUniform) setDotColorAck(null)
   if (backgroundAck != null && !backgroundUniform) setBackgroundAck(null)
+  if (metalAck != null && !metalUniform) setMetalAck(null)
   if (dotsAck != null && !dotsUniform) setDotsAck(null)
   if (groutAck != null && !groutUniform) setGroutAck(null)
   if (imageAck != null && !imageUniform) setImageAck(null)
@@ -1486,6 +1558,8 @@ export function Studio() {
   const filledApplied = filledAck === filledOn && filledUniform
   const bloomColorApplied = dotColorAck === bloomColorKey && bloomColorUniform
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
+  const metalApplied = metalAck === sectionMetal.toLowerCase() && metalUniform
+  const metalChoices = metalChoicesOf(studio, activePalette)
   const groutApplied = groutAck === sectionGrout.toLowerCase() && groutUniform
   const dotsApplied = dotsAck === sectionDots.toLowerCase() && dotsUniform
   const imageApplied = (collageOn ? imageAck === collagePicks.join('|') : imageAck === selectedImage) && imageUniform
@@ -2193,6 +2267,59 @@ export function Studio() {
             >
               {backgroundApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
+            {chromeOn ? (
+              <>
+                <p className="side-label">Metal color</p>
+                <div className="swatches background-swatches" role="listbox" aria-label="Metal color">
+                  {metalChoices.map((choice) => {
+                    const selected = choice.hex.toLowerCase() === sectionMetal.toLowerCase()
+                    return (
+                      <button
+                        key={`metal-${choice.label}-${choice.hex}`}
+                        type="button"
+                        className={selected ? 'swatch is-on' : 'swatch'}
+                        style={{ background: choice.hex }}
+                        aria-label={choice.label}
+                        aria-selected={selected}
+                        disabled={!section}
+                        onClick={(event) => {
+                          const changed = choice.hex.toLowerCase() !== sectionMetal.toLowerCase()
+                          if (changed) {
+                            setMetalAck(null)
+                            writeSection({ metal: choice.hex })
+                          }
+                          openPicker(event, {
+                            mode: 'edit',
+                            target: 'metal',
+                            hex: choice.hex,
+                            previous: choice.hex,
+                            custom: Boolean(choice.custom),
+                            ...(changed ? { revert: isHex(sectionEdit.metal) ? sectionEdit.metal : null } : {}),
+                          })
+                        }}
+                      />
+                    )
+                  })}
+                  <button
+                    type="button"
+                    className="add-swatch"
+                    aria-label="Add a metal color"
+                    disabled={!section || metalChoices.length >= MAX_METALS}
+                    onClick={(event) => openPicker(event, { mode: 'add', target: 'metal', hex: '#d25a3a' })}
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={metalApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+                  disabled={!section || !sections.length}
+                  onClick={applyMetal}
+                >
+                  {metalApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
+                </button>
+              </>
+            ) : null}
             {dotsOn ? (
               <>
                 <p className="side-label">Dot colors</p>
@@ -2869,6 +2996,7 @@ export function Studio() {
                 next[picker.index] = hex
                 writeDotColors(next)
               }
+              if (picker.target === 'metal' && isHex(hex)) writeSection({ metal: hex })
             }}
           />
           <input
@@ -2885,6 +3013,7 @@ export function Studio() {
                 next[picker.index] = hex
                 writeDotColors(next)
               }
+              if (picker.target === 'metal' && isHex(hex)) writeSection({ metal: hex })
             }}
           />
           <button type="submit" className="button" disabled={!isHex(picker.hex)}>

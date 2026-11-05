@@ -6,7 +6,16 @@ import { PAPER, isHex, labelKind, sectionAt, sectionKey, sectionSeed } from './s
 
 export const CHROME_COUNT = { min: 0, max: 12, count: 5 }
 export const CHROME_GREY = '#7E7F83'
+export const CHROME_SILVER = '#C8C8CC'
+export const CHROME_GOLD = '#D4AF37'
+export const CHROME_COPPER = '#B87333'
+export const CHROME_METALS = [
+  { hex: CHROME_SILVER, label: 'Silver' },
+  { hex: CHROME_GOLD, label: 'Gold' },
+  { hex: CHROME_COPPER, label: 'Copper' },
+]
 export const DEFAULT_CHROME_COLORS = ['#E8E4DC', '#7A8CA8', '#C4A574']
+export const MAX_METALS = 8
 
 const SPHERE_MAX = 24
 const CAP_MAX = 24
@@ -64,6 +73,13 @@ function tintOf(spec, section) {
   return clamp(Number(editOf(spec, section).tint ?? 40), 0, 100) / 100
 }
 
+function metalOf(spec, section) {
+  const saved = editOf(spec, section).metal
+  if (isHex(saved)) return saved
+  if (isHex(spec.metal)) return spec.metal
+  return CHROME_SILVER
+}
+
 function backgroundOf(spec, section) {
   const saved = editOf(spec, section).background
   if (isHex(saved)) return saved
@@ -109,14 +125,14 @@ function springStep(x, v, target, dt, w) {
 
 function lookFor(kind) {
   if (kind === 'Quiet' || kind === 'Intro' || kind === 'Break' || kind === 'Outro') {
-    return { amp: 0.55, warp: 0.04, flow: 0.26, stretch: 0.1, bend: 0.3, splash: 0.16, k: 0.34 }
+    return { amp: 0.55, warp: 0.07, flow: 0.22, stretch: 0.18, bend: 0.38, splash: 0.14, k: 0.46 }
   }
-  if (kind === 'Build') return { amp: 0.82, warp: 0.07, flow: 0.52, stretch: 0.86, bend: 0.58, splash: 0.48, k: 0.28 }
-  if (kind === 'Drop') return { amp: 1, warp: 0.09, flow: 0.68, stretch: 0.5, bend: 0.72, splash: 1, k: 0.26 }
+  if (kind === 'Build') return { amp: 0.82, warp: 0.1, flow: 0.48, stretch: 0.92, bend: 0.62, splash: 0.45, k: 0.4 }
+  if (kind === 'Drop') return { amp: 1, warp: 0.12, flow: 0.62, stretch: 0.55, bend: 0.78, splash: 1, k: 0.38 }
   if (kind === 'High' || kind === 'Main' || kind === 'Peak') {
-    return { amp: 0.94, warp: 0.08, flow: 0.76, stretch: 0.44, bend: 0.66, splash: 0.85, k: 0.27 }
+    return { amp: 0.94, warp: 0.11, flow: 0.7, stretch: 0.5, bend: 0.7, splash: 0.82, k: 0.4 }
   }
-  return { amp: 0.72, warp: 0.055, flow: 0.46, stretch: 0.24, bend: 0.42, splash: 0.42, k: 0.3 }
+  return { amp: 0.72, warp: 0.08, flow: 0.42, stretch: 0.3, bend: 0.48, splash: 0.4, k: 0.42 }
 }
 
 function lerpLook(from, to, amount) {
@@ -190,9 +206,9 @@ function cross(a, b) {
 
 function spinePoint(s, twist, bend, stretch) {
   const t = clamp(s, 0, 1)
-  const y = (t - 0.36) * (0.92 + stretch * 1.28)
-  const x = Math.sin(t * Math.PI * 1.35 + twist) * (0.24 + bend * 0.4)
-  const z = Math.cos(t * Math.PI * 0.92 + twist * 0.55) * (0.16 + bend * 0.26)
+  const x = (t - 0.5) * (1.08 + stretch * 0.5) + Math.sin(t * Math.PI * 2 + twist) * 0.1
+  const y = Math.sin(t * Math.PI * 1.28 + twist * 0.7) * (0.2 + bend * 0.3) + Math.sin(t * Math.PI * 2.15 + twist * 0.4) * 0.07
+  const z = Math.cos(t * Math.PI * 0.85 + twist * 0.45) * (0.08 + bend * 0.1)
   return [x, y, z]
 }
 
@@ -223,38 +239,38 @@ function layoutForm(spec, time, seed, look, bass, high, quiet, speed, size, drop
     capsules[i] = { a, b, r: r > 0.01 && len >= 0.03 ? r : 0 }
   }
 
-  const twist = time * (0.16 + speed * 0.55) + hashUnit(3, seed) * 6.28
-  const bend = look.bend * (0.7 + bass * 0.85) + drop.burst * 0.18
-  const stretch = look.stretch * (quiet ? 0.4 : 1) * (0.75 + bass * 0.45) - drop.pull * 0.2
-  const swell = (quiet ? 1.02 : 1.12) * (0.9 + bass * 0.28) * (1 - drop.pull * 0.1 + drop.burst * 0.08)
-  const flow = look.flow * (0.25 + speed * 1.8)
-  const fit = (0.76 + size * 0.16) * (quiet ? 1.04 : 0.94) * (1 - drop.burst * 0.16)
+  const twist = time * (0.12 + speed * 0.48) + hashUnit(3, seed) * 6.28
+  const bend = look.bend * (0.65 + bass * 0.8) + drop.burst * 0.16
+  const stretch = look.stretch * (quiet ? 0.45 : 1) * (0.78 + bass * 0.4) - drop.pull * 0.18
+  const swell = (quiet ? 0.82 : 0.9) * (0.88 + bass * 0.22) * (1 - drop.pull * 0.08 + drop.burst * 0.06)
+  const flow = look.flow * (0.22 + speed * 1.6)
+  const fit = (1.02 + size * 0.14) * (quiet ? 1.04 : 0.98) * (1 - drop.burst * 0.12)
 
-  const core = [0, 0.04 * fit, 0]
-  setS(0, core, (quiet ? 0.46 : 0.3) * fit * swell)
+  const core = [0.02 * fit, 0.02 * fit, 0]
+  setS(0, core, 0.28 * fit * swell)
 
   const nodes = []
   for (let i = 0; i < BODY_N; i += 1) {
     const s = i / Math.max(1, BODY_N - 1)
-    const drift = Math.sin(time * flow * 0.55 + i * 0.9) * 0.028
+    const drift = Math.sin(time * flow * 0.48 + i * 0.85) * 0.02
     const p = scale(spinePoint(clamp(s + drift, 0, 1), twist, bend, stretch), fit)
-    const fat = Math.sin(s * Math.PI) ** 0.45
-    const r = (0.2 + fat * 0.16) * fit * swell
+    const fat = Math.sin(s * Math.PI) ** 0.55
+    const r = (0.125 + fat * 0.09) * fit * swell
     nodes.push({ p, r, s })
     setS(1 + i, p, r)
   }
   for (let i = 0; i < BODY_N - 1; i += 1) {
-    setC(i, nodes[i].p, nodes[i + 1].p, Math.min(nodes[i].r, nodes[i + 1].r) * 0.88)
+    setC(i, nodes[i].p, nodes[i + 1].p, Math.min(nodes[i].r, nodes[i + 1].r) * 0.92)
   }
-  setC(4, core, nodes[0].p, Math.min(0.24 * fit * swell, nodes[0].r))
-  setC(5, core, nodes[BODY_N - 1].p, Math.min(0.2 * fit * swell, nodes[BODY_N - 1].r * 0.95))
+  setC(4, core, nodes[0].p, Math.min(0.14 * fit * swell, nodes[0].r))
+  setC(5, core, nodes[BODY_N - 1].p, Math.min(0.13 * fit * swell, nodes[BODY_N - 1].r * 0.95))
 
-  const lobeAt = 0.42 + hashUnit(9, seed) * 0.16
+  const lobeAt = 0.36 + hashUnit(9, seed) * 0.22
   const lobe = scale(spinePoint(lobeAt, twist, bend, stretch), fit)
-  const side = normalize3(cross(spinePoint(lobeAt + 0.04, twist, bend, stretch), [0, 1, 0]))
-  const lobeEnd = add(lobe, scale(side, (0.2 + bend * 0.1) * fit * swell))
-  setS(6, lobeEnd, 0.16 * fit * swell)
-  setC(6, lobe, lobeEnd, 0.12 * fit * swell)
+  const side = normalize3(cross(spinePoint(lobeAt + 0.05, twist, bend, stretch), [0, 1, 0]))
+  const lobeEnd = add(lobe, scale(side, (0.16 + bend * 0.08) * fit * swell))
+  setS(6, lobeEnd, 0.085 * fit * swell)
+  setC(6, lobe, lobeEnd, 0.07 * fit * swell)
 
   const tempo = Math.max(40, spec.tempo || 100)
   const period = 60 / tempo
@@ -289,11 +305,11 @@ function layoutForm(spec, time, seed, look, bass, high, quiet, speed, size, drop
       if (i >= n) continue
       const a = ((i + hashUnit(i, splash.salt)) / n) * Math.PI * 2
       const dir = normalize3(add(scale(axis, 0.42), add(scale(tangent, Math.cos(a) * 1.05), scale(bitan, Math.sin(a) * 1.05))))
-      const len = (splash.crown ? 0.76 : 0.58) * splash.gain * fit
-      const root = add(splash.origin, scale(dir, 0.1 * fit))
+      const len = (splash.crown ? 0.7 : 0.5) * splash.gain * fit
+      const root = add(splash.origin, scale(dir, 0.08 * fit))
       const tip = add(splash.origin, scale(dir, len))
-      setC(7 + i, root, tip, (0.085 - i * 0.006) * fit * (0.65 + splash.gain * 0.45))
-      setS(7 + i, tip, (0.075 + hashUnit(i, splash.salt ^ 8) * 0.04) * fit * (0.6 + splash.gain * 0.55))
+      setC(7 + i, root, tip, (0.055 - i * 0.005) * fit * (0.6 + splash.gain * 0.4))
+      setS(7 + i, tip, (0.048 + hashUnit(i, splash.salt ^ 8) * 0.028) * fit * (0.55 + splash.gain * 0.5))
     }
   }
 
@@ -313,9 +329,9 @@ function layoutForm(spec, time, seed, look, bass, high, quiet, speed, size, drop
       0.35 + hashUnit(i, seed ^ 0xd7) * 0.8,
       hashUnit(i, seed ^ 0xe8) * 2 - 1,
     ])
-    const tip = add(base, scale(dir, (0.16 + out * 0.48) * fit))
-    setC(12 + i, base, tip, 0.055 * fit * (0.4 + out * 0.7))
-    setS(12 + i, tip, (0.06 + hashUnit(i, seed ^ 0xf9) * 0.04) * fit * (0.45 + out * 0.7))
+    const tip = add(base, scale(dir, (0.14 + out * 0.42) * fit))
+    setC(12 + i, base, tip, 0.038 * fit * (0.35 + out * 0.65))
+    setS(12 + i, tip, (0.042 + hashUnit(i, seed ^ 0xf9) * 0.028) * fit * (0.4 + out * 0.65))
   }
 
   return { spheres, capsules, k: look.k, warp: look.warp * (quiet ? 0.55 : 1), flow: look.flow * (0.3 + speed * 1.6) }
@@ -480,14 +496,15 @@ float smin(float a, float b, float k) {
 
 vec3 warp(vec3 p) {
   float t = uTime * uFlow;
-  p.x += uWarp * sin(p.y * 1.05 + t * 0.72);
-  p.z += uWarp * sin(p.x * 0.82 + t * 0.54);
-  p.y += uWarp * 0.45 * sin(p.z * 0.7 + t * 0.4);
+  p.x += uWarp * 1.15 * sin(p.y * 0.82 + t * 0.58);
+  p.z += uWarp * 0.7 * sin(p.x * 0.64 + t * 0.44);
+  p.y += uWarp * 0.55 * sin(p.x * 0.5 + t * 0.36);
   return p;
 }
 
 float map(vec3 p) {
   p = warp(p);
+  p.z *= 1.65;
   float d = 1e5;
   float k = uK;
   for (int i = 0; i < ${SPHERE_MAX}; i++) {
@@ -496,7 +513,7 @@ float map(vec3 p) {
   for (int i = 0; i < ${CAP_MAX}; i++) {
     if (uCA[i].w > 0.001) d = smin(d, sdCapsule(p, uCA[i].xyz, uCB[i], uCA[i].w), k);
   }
-  return d;
+  return d / 1.65;
 }
 `
 }
@@ -536,18 +553,17 @@ float softStrip(vec3 r, vec3 dir, float width, float feather) {
 vec3 studio(vec3 r) {
   vec3 rd = normalize(r);
   float y = rd.y;
-  vec3 down = vec3(0.1, 0.105, 0.11);
-  vec3 up = vec3(0.86, 0.875, 0.89);
-  vec3 col = mix(down, up, smoothstep(-0.9, 0.95, y));
-  col = mix(col, vec3(0.26, 0.27, 0.285), exp(-y * y * 6.0) * 0.3);
-  col += vec3(0.22) * pow(max(dot(rd, normalize(vec3(-0.72, 0.18, 0.42))), 0.0), 2.2);
-  col += vec3(0.1) * pow(max(dot(rd, normalize(vec3(0.62, -0.28, 0.38))), 0.0), 1.7);
-  col += vec3(1.0) * 0.95 * softBox(rd, normalize(vec3(-0.32, 0.58, 0.62)), vec2(0.18, 0.12), 0.22);
-  col += vec3(0.98) * 0.7 * softBox(rd, normalize(vec3(0.52, 0.4, 0.48)), vec2(0.14, 0.09), 0.2);
-  col += vec3(0.92) * 0.38 * softBox(rd, normalize(vec3(0.08, 0.12, 0.9)), vec2(0.24, 0.08), 0.24);
-  col += uC0 * uTint * 0.38 * softStrip(rd, normalize(vec3(0.38, 0.78, 0.28)), 0.04, 0.11);
-  col += uC1 * uTint * 0.3 * softStrip(rd, normalize(vec3(-0.42, 0.74, 0.22)), 0.032, 0.1);
-  col += uC2 * uTint * 0.24 * softStrip(rd, normalize(vec3(0.1, 0.48, 0.82)), 0.026, 0.09);
+  vec3 down = vec3(0.07, 0.072, 0.078);
+  vec3 up = vec3(0.78, 0.8, 0.83);
+  vec3 col = mix(down, up, smoothstep(-0.85, 0.92, y));
+  col = mix(col, vec3(0.18, 0.185, 0.195), exp(-y * y * 8.0) * 0.32);
+  col += vec3(0.2) * pow(max(dot(rd, normalize(vec3(-0.7, 0.22, 0.48))), 0.0), 2.2);
+  col += vec3(1.05) * 1.25 * softBox(rd, normalize(vec3(-0.28, 0.62, 0.58)), vec2(0.22, 0.13), 0.12);
+  col += vec3(1.0) * 0.9 * softBox(rd, normalize(vec3(0.55, 0.38, 0.5)), vec2(0.16, 0.1), 0.12);
+  col += vec3(0.95) * 0.42 * softBox(rd, normalize(vec3(0.06, 0.08, 0.92)), vec2(0.24, 0.08), 0.15);
+  col += uC0 * uTint * 0.42 * softStrip(rd, normalize(vec3(0.38, 0.78, 0.28)), 0.036, 0.09);
+  col += uC1 * uTint * 0.32 * softStrip(rd, normalize(vec3(-0.42, 0.74, 0.22)), 0.028, 0.08);
+  col += uC2 * uTint * 0.24 * softStrip(rd, normalize(vec3(0.1, 0.48, 0.82)), 0.022, 0.07);
   return col;
 }
 
@@ -555,18 +571,21 @@ vec3 shade(vec3 p, vec3 rd) {
   vec3 n = calcNormal(p);
   vec3 ref = reflect(rd, n);
   float ndv = clamp(dot(n, -rd), 0.0, 1.0);
-  float fres = pow(1.0 - ndv, 2.4);
+  float fres = pow(1.0 - ndv, 2.15);
+  float peak = max(uMetal.r, max(uMetal.g, uMetal.b));
+  vec3 metal = uMetal / max(peak, 0.18);
   vec3 env = studio(ref);
-  vec3 col = env * mix(0.9, 1.16, fres);
-  float occ = clamp(map(p + n * 0.1) / 0.1, 0.0, 1.0);
-  col *= mix(0.74, 1.0, occ);
+  vec3 col = env * metal * mix(0.95, 1.28, fres);
+  col += metal * 0.05 * fres;
+  float occ = clamp(map(p + n * 0.08) / 0.08, 0.0, 1.0);
+  col *= mix(0.82, 1.0, occ);
   return col;
 }
 
 vec4 trace(vec2 frag) {
   vec2 uv = (frag - 0.5 * uRes) / uRes.y;
-  vec3 ro = vec3(0.0, 0.08, 3.28);
-  vec3 rd = normalize(vec3(uv, -1.22));
+  vec3 ro = vec3(0.0, 0.04, 3.05);
+  vec3 rd = normalize(vec3(uv, -1.28));
   float t = 0.0;
   float hit = 0.0;
   float closest = 1e5;
@@ -604,6 +623,7 @@ uniform float uK;
 uniform float uTint;
 uniform float uAA;
 uniform vec3 uBg;
+uniform vec3 uMetal;
 uniform vec3 uC0;
 uniform vec3 uC1;
 uniform vec3 uC2;
@@ -674,6 +694,7 @@ function makeUniforms() {
     uTint: { value: 0.4 },
     uAA: { value: 1 },
     uBg: { value: hexToVec(CHROME_GREY) },
+    uMetal: { value: hexToVec(CHROME_SILVER) },
     uC0: { value: hexToVec(DEFAULT_CHROME_COLORS[0]) },
     uC1: { value: hexToVec(DEFAULT_CHROME_COLORS[1]) },
     uC2: { value: hexToVec(DEFAULT_CHROME_COLORS[2]) },
@@ -731,7 +752,7 @@ function marchSize(drawW, drawH, spec) {
 }
 
 export function explainChrome() {
-  return 'A liquid-metal sculpture is built from blobs and stretched capsules that melt together along a twisting spine. Beats throw splash-crown tips, highs shake droplets loose, and the palette only shows up as soft light streaks in the chrome.'
+  return 'A thin liquid-metal sculpture melts together along a twisting spine. Beats throw splash-crown tips, highs shake droplets loose, and the metal color tints the whole reflection while the palette only shows up as light streaks.'
 }
 
 export function paintChrome(ctx, spec) {
@@ -764,9 +785,10 @@ export function paintChrome(ctx, spec) {
   uniforms.uTime.value = time
   uniforms.uWarp.value = form.warp
   uniforms.uFlow.value = form.flow
-  uniforms.uK.value = Math.max(0.12, form.k)
+  uniforms.uK.value = Math.max(0.22, form.k)
   uniforms.uTint.value = tint
   uniforms.uBg.value.copy(hexToVec(background))
+  uniforms.uMetal.value.copy(hexToVec(metalOf(spec, section)))
   uniforms.uC0.value.copy(hexToVec(colors[0] || DEFAULT_CHROME_COLORS[0]))
   uniforms.uC1.value.copy(hexToVec(colors[1] || colors[0] || DEFAULT_CHROME_COLORS[1]))
   uniforms.uC2.value.copy(hexToVec(colors[2] || colors[0] || DEFAULT_CHROME_COLORS[2]))
