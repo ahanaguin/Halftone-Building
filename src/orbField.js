@@ -65,18 +65,13 @@ function visibleInk(hex, background) {
   const [br, bg, bb] = hexToRgb(ground)
   const [h, s, l] = rgbToHsl(r, g, b)
   const [, , bl] = rgbToHsl(br, bg, bb)
-  const gap = 0.2
-  if (Math.hypot(r - br, g - bg, b - bb) / 441.67 >= gap && Math.abs(l - bl) >= gap) return ink
-  let target
-  if (l >= bl) {
-    target = Math.min(0.94, Math.max(l, bl + gap))
-    if (target - bl < gap) target = Math.max(0.08, bl - gap)
-  } else {
-    target = Math.max(0.08, Math.min(l, bl - gap))
-    if (bl - target < gap) target = Math.min(0.94, bl + gap)
+  const vivid = Math.min(1, s * 1.18 + 0.08)
+  const gap = bl > 0.55 ? 0.38 : 0.28
+  let target = l
+  if (Math.abs(l - bl) < gap) {
+    target = bl > 0.55 ? Math.max(0.08, bl - gap) : Math.min(0.92, bl + gap)
   }
-  if (Math.abs(target - l) < 0.002) return ink
-  return hslToHex(h, s, target)
+  return hslToHex(h, vivid, target)
 }
 
 function backgroundOf(spec, section) {
@@ -359,10 +354,9 @@ void main() {
   float depth = clamp((-mv.z - 3.0) / 2.2, 0.0, 1.0);
   float back = 1.0 - smoothstep(-0.12, 0.22, viewN.z);
   float shimmer = 1.0 + uHigh * 0.1 * sin(uTime * 3.1 + aHash * 6.2832);
-  float size = uPointSize * mix(1.2, 0.4, depth) * (1.0 + ridge * 0.32) * shimmer * mix(1.0, 0.55, back);
-  gl_PointSize = max(1.0, size);
-  vAlpha = mix(0.38, 0.08, depth) * (0.78 + ridge * 0.7) * mix(1.0, 0.18, back);
-  vColor *= 0.88 + facing * 0.08 + ridge * 0.12;
+  float size = uPointSize * mix(1.35, 0.55, depth) * (1.0 + ridge * 0.28) * shimmer * mix(1.0, 0.7, back);
+  gl_PointSize = max(1.2, size);
+  vAlpha = mix(0.98, 0.42, depth) * mix(1.0, 0.55, back);
 }
 `
 
@@ -374,9 +368,8 @@ void main() {
   vec2 p = gl_PointCoord * 2.0 - 1.0;
   float d = dot(p, p);
   if (d > 1.0) discard;
-  float soft = 1.0 - smoothstep(0.5, 1.0, d);
-  vec3 color = min(vColor, vec3(0.9));
-  gl_FragColor = vec4(color, vAlpha * soft);
+  float soft = 1.0 - smoothstep(0.62, 1.0, d);
+  gl_FragColor = vec4(vColor, vAlpha * soft);
 }
 `
 
@@ -468,7 +461,7 @@ function ensureRenderer() {
     transparent: true,
     depthWrite: false,
     depthTest: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     premultipliedAlpha: false,
   })
   return true
@@ -546,12 +539,13 @@ export function paintOrb(ctx, spec) {
   const drop = dropMotion(spec, time)
   const amp = look.amp * (quiet ? 0.45 + bass * 0.25 : 0.55 + bass * 0.95) + drop.burst * 0.22
   const freq = look.freq * (0.78 + mids * 0.55)
-  const flow = look.flow * (0.7 + speed * 0.55)
-  const spin = time * ((Math.PI * 2) / (48 - speed * 16))
+  const flow = look.flow * (0.18 + speed * 3.1)
+  const spin = time * ((Math.PI * 2) / Math.max(7, 78 - speed * 71))
   const scale = 1 - drop.pull * 0.085 + drop.burst * 0.04
-  const breathe = quiet ? Math.sin(time * 0.7) * 0.018 : Math.sin(time * 0.55) * 0.01
+  const breatheRate = 0.28 + speed * 1.35
+  const breathe = (quiet ? 0.02 : 0.012) * Math.sin(time * breatheRate)
   const shortSide = frameCamera(width, height)
-  const pointSize = (1.35 + sizeOf(spec, section) * 3.6) * (shortSide / 540)
+  const pointSize = (1.55 + sizeOf(spec, section) * 3.8) * (shortSide / 540)
   const colors = orbDotColorsOf(edit).map((hex) => visibleInk(hex, background))
   const ripples = ripplesAt(spec, time, seed, tempo, quiet)
   const transform = typeof ctx.getTransform === 'function' ? ctx.getTransform() : { a: 1, d: 1, e: 0, f: 0 }

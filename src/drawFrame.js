@@ -5,6 +5,7 @@ import { paintHalftone } from './halftoneField.js'
 import { paintMosaic } from './mosaicField.js'
 import { paintBloom } from './bloomField.js'
 import { paintOrb } from './orbField.js'
+import { paintChrome } from './chromeField.js'
 import { paintGrid } from './gridField.js'
 import { metricsAt } from './profileTrack.js'
 import { workingSections } from './sectionEdit.js'
@@ -58,6 +59,7 @@ export function paintFrame(ctx, spec) {
   ctx.globalCompositeOperation = 'source-over'
   if (spec.style === 'bloom') paintBloom(ctx, spec)
   else if (spec.style === 'orb') paintOrb(ctx, spec)
+  else if (spec.style === 'chrome') paintChrome(ctx, spec)
   else if (spec.style === 'image') {
     const composition = imageComposition(spec)
     if (composition === 'collage') paintCollage(ctx, spec)
@@ -66,7 +68,7 @@ export function paintFrame(ctx, spec) {
   }
   else if (frameMode(spec) === 'grid') paintGrid(ctx, spec)
   else paintMetaballs(ctx, spec)
-  if (spec.style !== 'image' && spec.style !== 'bloom' && spec.style !== 'orb') paintGrain(ctx, width, height)
+  if (spec.style !== 'image' && spec.style !== 'bloom' && spec.style !== 'orb' && spec.style !== 'chrome') paintGrain(ctx, width, height)
   ctx.restore()
 }
 

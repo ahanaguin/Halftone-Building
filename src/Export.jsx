@@ -30,6 +30,7 @@ const STYLE_LABELS = {
   image: 'Image animation',
   bloom: 'Bloom',
   orb: 'Orb',
+  chrome: 'Chrome',
 }
 
 function Check({ checked, onChange, label, disabled }) {

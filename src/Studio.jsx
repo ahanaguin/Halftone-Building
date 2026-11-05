@@ -33,6 +33,7 @@ import { FocusEditor } from './FocusEditor.jsx'
 import { DOT_DENSITY, DOT_SIZE_DEFAULT } from './halftoneField.js'
 import { BLOOM_COUNT, COLOR_MODES, DEFAULT_DOT_COLOR, MAX_DOT_COLORS, bloomDotColorsOf, colorModeOf, explainBloom } from './bloomField.js'
 import { DEFAULT_ORB_COLORS, ORB_COUNT, explainOrb, orbDotColorsOf } from './orbField.js'
+import { CHROME_COUNT, CHROME_GREY, explainChrome } from './chromeField.js'
 import { INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
@@ -50,10 +51,11 @@ function backgroundChoicesOf(studio, paletteSource) {
   }
   const source = paletteSource?.swatches || studio.palette?.swatches || []
   const palette = source.map((swatch) => swatchHex(swatch))
-  const room = Math.max(0, MAX_BACKGROUNDS - 2 - extras.length)
+  const room = Math.max(0, MAX_BACKGROUNDS - 3 - extras.length)
   const choices = [
     { hex: PAPER, label: 'Off-white' },
     { hex: INK_BLACK, label: 'Near-black' },
+    { hex: CHROME_GREY, label: 'Soft grey' },
   ]
   palette.slice(0, room).forEach((hex, index) => {
     if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
@@ -70,6 +72,7 @@ const STYLES = [
   { id: 'shapes', label: 'Liquid', ready: true },
   { id: 'bloom', label: 'Bloom', ready: true },
   { id: 'orb', label: 'Orb', ready: true },
+  { id: 'chrome', label: 'Chrome', ready: true },
   { id: 'halftone', label: 'Halftone', ready: false },
   { id: 'bars', label: 'Bars', ready: false },
   { id: 'wave', label: 'Wave', ready: false },
@@ -401,7 +404,7 @@ export function Studio() {
   })
 
   useEffect(() => {
-    if (!holderRef.current || !track || (studio.style !== 'shapes' && studio.style !== 'image' && studio.style !== 'bloom' && studio.style !== 'orb')) return undefined
+    if (!holderRef.current || !track || (studio.style !== 'shapes' && studio.style !== 'image' && studio.style !== 'bloom' && studio.style !== 'orb' && studio.style !== 'chrome')) return undefined
     return mountShapes(holderRef.current, liveRef, sizeRef)
   }, [track, studio.style, expanded])
 
@@ -772,6 +775,10 @@ export function Studio() {
     writeSection({ count: Number(event.target.value) })
   }
 
+  function onTint(event) {
+    writeSection({ tint: Number(event.target.value) })
+  }
+
   function onSectionContrast(event) {
     writeSection({ contrast: Number(event.target.value) })
   }
@@ -876,7 +883,11 @@ export function Studio() {
         ? isHex(studio.background) && studio.background.toLowerCase() !== PAPER.toLowerCase()
           ? studio.background
           : INK_BLACK
-        : studio.background || PAPER
+        : studio.style === 'chrome'
+          ? isHex(studio.background) && studio.background.toLowerCase() !== PAPER.toLowerCase()
+            ? studio.background
+            : CHROME_GREY
+          : studio.background || PAPER
     editStudio((current) => {
       const edits = { ...(current.edits || {}) }
       let changed = false
@@ -1324,8 +1335,9 @@ export function Studio() {
   const imageOn = studio.style === 'image'
   const bloomOn = studio.style === 'bloom'
   const orbOn = studio.style === 'orb'
+  const chromeOn = studio.style === 'chrome'
   const dotsOn = bloomOn || orbOn
-  const visualOn = shapesOn || imageOn || bloomOn || orbOn
+  const visualOn = shapesOn || imageOn || bloomOn || orbOn || chromeOn
   const sectionEdit = studio.edits?.[activeKey] || {}
   const warmth = Math.round((1 - (dotsOn ? (sectionEdit.dotWarmth ?? 0.5) : (activePalette.warmth ?? 0.5))) * 100)
   const lightness = Math.round((dotsOn ? (sectionEdit.dotLightness ?? 0.5) : (activePalette.lightness ?? 0.5)) * 100)
@@ -1373,6 +1385,7 @@ export function Studio() {
         ]
   const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
   const sizeValue = sectionEdit.size ?? (mosaicOn ? 32 : imageOn ? DOT_SIZE_DEFAULT : 50)
+  const tintValue = Math.min(100, Math.max(0, Math.round(sectionEdit.tint ?? 40)))
   const shimmerValue = sectionEdit.shimmer ?? 80
   const countValue = collageOn
     ? collageCount({ edits: studio.edits, seeds: studio.seeds }, section)
@@ -1380,6 +1393,8 @@ export function Studio() {
       ? Math.min(BLOOM_COUNT.max, Math.max(BLOOM_COUNT.min, Math.round(sectionEdit.count ?? BLOOM_COUNT.count)))
       : orbOn
         ? Math.min(ORB_COUNT.max, Math.max(ORB_COUNT.min, Math.round(sectionEdit.count ?? ORB_COUNT.count)))
+        : chromeOn
+        ? Math.min(CHROME_COUNT.max, Math.max(CHROME_COUNT.min, Math.round(sectionEdit.count ?? CHROME_COUNT.count)))
         : imageOn
         ? Math.min(DOT_DENSITY.max, Math.max(DOT_DENSITY.min, sectionEdit.count ?? DOT_DENSITY.count))
         : Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
@@ -1399,7 +1414,11 @@ export function Studio() {
       ? isHex(studio.background) && studio.background.toLowerCase() !== PAPER.toLowerCase()
         ? studio.background
         : INK_BLACK
-      : studio.background || PAPER
+      : chromeOn
+        ? isHex(studio.background) && studio.background.toLowerCase() !== PAPER.toLowerCase()
+          ? studio.background
+          : CHROME_GREY
+        : studio.background || PAPER
   const sectionDots = isHex(sectionEdit.dots) ? sectionEdit.dots : INK_BLACK
   const contrastValue = sectionEdit.contrast ?? 50
   const selectedImage = section ? imageIdFor(section) : ''
@@ -1740,7 +1759,7 @@ export function Studio() {
                 onPointerUp={onPlaceUp}
                 onPointerCancel={onPlaceUp}
                 role={track && visualOn ? 'img' : undefined}
-                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && orbOn ? 'Orb reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && orbOn ? 'Orb reacting to the track' : track && chromeOn ? 'Chrome reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
               />
             )}
             {track && visualOn ? null : (
@@ -1752,7 +1771,7 @@ export function Studio() {
                     <Link className="canvas-upload" to="/upload">
                       Go to Upload
                     </Link>
-                    <p>{bloomOn ? 'Upload a track to see bloom.' : orbOn ? 'Upload a track to see orb.' : 'Upload a track to see liquid.'}</p>
+                    <p>{bloomOn ? 'Upload a track to see bloom.' : orbOn ? 'Upload a track to see orb.' : chromeOn ? 'Upload a track to see chrome.' : 'Upload a track to see liquid.'}</p>
                   </>
                 )}
               </div>
@@ -1766,7 +1785,9 @@ export function Studio() {
         <div className="why">
           <strong>Why it looks like this</strong>
           <p>
-            {orbOn
+            {chromeOn
+              ? explainChrome()
+              : orbOn
               ? explainOrb()
               : bloomOn
               ? explainBloom()
@@ -2010,6 +2031,8 @@ export function Studio() {
 
         {visualOn ? (
           <>
+            {chromeOn ? null : (
+              <>
             <p className="side-label">Composition</p>
             <label className="style-field">
               <select
@@ -2034,6 +2057,8 @@ export function Studio() {
             >
               {compositionApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
+              </>
+            )}
             {bloomOn ? (
               <>
                 <div className="background-row">
@@ -2393,6 +2418,27 @@ export function Studio() {
           </>
         )}
 
+        {chromeOn ? (
+          <>
+            <div className="slider-labels">
+              <span>Silver</span>
+              <span>Tint</span>
+            </div>
+            <input
+              className="range"
+              type="range"
+              min="0"
+              max="100"
+              value={tintValue}
+              onPointerDown={startSlide}
+              onPointerUp={finishSlide}
+              onPointerCancel={finishSlide}
+              onChange={onTint}
+              aria-label="Tint"
+            />
+          </>
+        ) : null}
+
         {collageOn || mosaicOn ? null : (
           <>
             <div className="slider-labels">
@@ -2412,22 +2458,26 @@ export function Studio() {
               aria-label="Warm to cool"
             />
 
-            <div className="slider-labels">
-              <span>Dark</span>
-              <span>Light</span>
-            </div>
-            <input
-              className="range"
-              type="range"
-              min="0"
-              max="100"
-              value={lightness}
-              onPointerDown={startSlide}
-              onPointerUp={finishSlide}
-              onPointerCancel={finishSlide}
-              onChange={onLightness}
-              aria-label="Dark to light"
-            />
+            {orbOn ? null : (
+              <>
+                <div className="slider-labels">
+                  <span>Dark</span>
+                  <span>Light</span>
+                </div>
+                <input
+                  className="range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={lightness}
+                  onPointerDown={startSlide}
+                  onPointerUp={finishSlide}
+                  onPointerCancel={finishSlide}
+                  onChange={onLightness}
+                  aria-label="Dark to light"
+                />
+              </>
+            )}
           </>
         )}
 
@@ -2567,8 +2617,8 @@ export function Studio() {
             <input
               className="range"
               type="range"
-              min={orbOn ? ORB_COUNT.min : bloomOn ? BLOOM_COUNT.min : collageOn ? PANEL_COUNT.min : imageOn ? DOT_DENSITY.min : shapeRange.min}
-              max={orbOn ? ORB_COUNT.max : bloomOn ? BLOOM_COUNT.max : collageOn ? PANEL_COUNT.max : imageOn ? DOT_DENSITY.max : shapeRange.max}
+              min={orbOn ? ORB_COUNT.min : chromeOn ? CHROME_COUNT.min : bloomOn ? BLOOM_COUNT.min : collageOn ? PANEL_COUNT.min : imageOn ? DOT_DENSITY.min : shapeRange.min}
+              max={orbOn ? ORB_COUNT.max : chromeOn ? CHROME_COUNT.max : bloomOn ? BLOOM_COUNT.max : collageOn ? PANEL_COUNT.max : imageOn ? DOT_DENSITY.max : shapeRange.max}
               step={orbOn ? 100 : 1}
               value={countValue}
               onPointerDown={startSlide}
@@ -2615,7 +2665,7 @@ export function Studio() {
                     )
                   })}
                 </div>
-                <p className="section-note">Drag the picture to move the main shape.</p>
+                {chromeOn ? null : <p className="section-note">Drag the picture to move the main shape.</p>}
               </>
             )}
               </>
@@ -2863,7 +2913,7 @@ export function Studio() {
                 onPointerUp={onPlaceUp}
                 onPointerCancel={onPlaceUp}
                 role={track && visualOn ? 'img' : undefined}
-                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && orbOn ? 'Orb reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && orbOn ? 'Orb reacting to the track' : track && chromeOn ? 'Chrome reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
               />
             </div>,
             document.body,
