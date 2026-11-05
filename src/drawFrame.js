@@ -3,6 +3,7 @@ import { frameMode, paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
 import { imageComposition, paintCollage } from './collageField.js'
 import { paintHalftone } from './halftoneField.js'
 import { paintMosaic } from './mosaicField.js'
+import { paintBloom } from './bloomField.js'
 import { paintGrid } from './gridField.js'
 import { metricsAt } from './profileTrack.js'
 import { workingSections } from './sectionEdit.js'
@@ -54,7 +55,8 @@ export function paintFrame(ctx, spec) {
   ctx.save()
   ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
-  if (spec.style === 'image') {
+  if (spec.style === 'bloom') paintBloom(ctx, spec)
+  else if (spec.style === 'image') {
     const composition = imageComposition(spec)
     if (composition === 'collage') paintCollage(ctx, spec)
     else if (composition === 'mosaic') paintMosaic(ctx, spec)
@@ -62,7 +64,7 @@ export function paintFrame(ctx, spec) {
   }
   else if (frameMode(spec) === 'grid') paintGrid(ctx, spec)
   else paintMetaballs(ctx, spec)
-  if (spec.style !== 'image') paintGrain(ctx, width, height)
+  if (spec.style !== 'image' && spec.style !== 'bloom') paintGrain(ctx, width, height)
   ctx.restore()
 }
 

@@ -31,6 +31,7 @@ import { PANEL_COUNT, collageCount, collageImageIds, prepareCollage } from './co
 import { prepareMosaic } from './mosaicField.js'
 import { FocusEditor } from './FocusEditor.jsx'
 import { DOT_DENSITY, DOT_SIZE_DEFAULT } from './halftoneField.js'
+import { BLOOM_COUNT, COLOR_MODES, DEFAULT_DOT_COLOR, MAX_DOT_COLORS, bloomDotColorsOf, colorModeOf, explainBloom } from './bloomField.js'
 import { INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
@@ -66,6 +67,7 @@ function backgroundChoicesOf(studio, paletteSource) {
 }
 const STYLES = [
   { id: 'shapes', label: 'Liquid', ready: true },
+  { id: 'bloom', label: 'Bloom', ready: true },
   { id: 'halftone', label: 'Halftone', ready: false },
   { id: 'bars', label: 'Bars', ready: false },
   { id: 'wave', label: 'Wave', ready: false },
@@ -148,6 +150,8 @@ export function Studio() {
   const [toast, setToast] = useState('')
   const [arrangementAck, setArrangementAck] = useState(null)
   const [compositionAck, setCompositionAck] = useState(null)
+  const [filledAck, setFilledAck] = useState(null)
+  const [dotColorAck, setDotColorAck] = useState(null)
   const [backgroundAck, setBackgroundAck] = useState(null)
   const [dotsAck, setDotsAck] = useState(null)
   const [groutAck, setGroutAck] = useState(null)
@@ -391,7 +395,7 @@ export function Studio() {
   })
 
   useEffect(() => {
-    if (!holderRef.current || !track || (studio.style !== 'shapes' && studio.style !== 'image')) return undefined
+    if (!holderRef.current || !track || (studio.style !== 'shapes' && studio.style !== 'image' && studio.style !== 'bloom')) return undefined
     return mountShapes(holderRef.current, liveRef, sizeRef)
   }, [track, studio.style, expanded])
 
@@ -595,8 +599,45 @@ export function Studio() {
     else editStudio(apply)
   }
 
+  function shiftBloomDots({ warmth, lightness }) {
+    if (!section) return
+    const key = sectionKey(section)
+    const apply = (current) => {
+      const previous = current.edits?.[key] || {}
+      const fromW = previous.dotWarmth ?? 0.5
+      const fromL = previous.dotLightness ?? 0.5
+      const toW = warmth ?? fromW
+      const toL = lightness ?? fromL
+      if (toW === fromW && toL === fromL) return current
+      const swatches = bloomDotColorsOf(previous).map((hex, index) => {
+        const [red, green, blue] = hexToRgb(hex)
+        const [h, s, l] = rgbToHsl(red, green, blue)
+        return { id: `bloom-${index}`, h, s, l }
+      })
+      const next = shiftUnlocked(swatches, fromW, toW, fromL, toL)
+      return {
+        ...current,
+        edits: {
+          ...(current.edits || {}),
+          [key]: {
+            ...previous,
+            dotColors: next.map((swatch) => hslToHex(swatch.h, swatch.s, swatch.l)),
+            dotWarmth: toW,
+            dotLightness: toL,
+          },
+        },
+      }
+    }
+    if (slideOrigin.current) syncStudio(apply)
+    else editStudio(apply)
+  }
+
   function onWarmth(event) {
     const warmth = 1 - Number(event.target.value) / 100
+    if (studio.style === 'bloom') {
+      shiftBloomDots({ warmth })
+      return
+    }
     writePalette((palette) => {
       if (warmth === palette.warmth) return palette
       return {
@@ -610,6 +651,10 @@ export function Studio() {
 
   function onLightness(event) {
     const lightness = Number(event.target.value) / 100
+    if (studio.style === 'bloom') {
+      shiftBloomDots({ lightness })
+      return
+    }
     writePalette((palette) => {
       if (lightness === palette.lightness) return palette
       return {
@@ -734,6 +779,7 @@ export function Studio() {
       if (edit?.composition === 'mosaic') return 'mosaic'
       return 'halftone'
     }
+    if (studio.style === 'bloom') return edit?.composition === 'ring' ? 'ring' : 'full'
     return ['free', 'mirror', 'quad', 'radial'].includes(edit?.composition) ? edit.composition : 'auto'
   }
 
@@ -752,9 +798,60 @@ export function Studio() {
       }
       return changed ? { ...current, edits } : current
     })
-    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', halftone: 'Halftone', collage: 'Collage', mosaic: 'Mosaic' }[mode]
+    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', halftone: 'Halftone', collage: 'Collage', mosaic: 'Mosaic', full: 'Full', ring: 'Ring' }[mode]
     setCompositionAck(mode)
     showToast(`${name} applied to all sections.`)
+  }
+
+  function applyFilled() {
+    if (!sections.length) return
+    const filled = studio.edits?.[activeKey]?.filled === true
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        if (Boolean(previous.filled) === filled) continue
+        edits[key] = { ...previous, filled }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setFilledAck(filled)
+    showToast(filled ? 'Filled dots applied to all sections.' : 'Outline dots applied to all sections.')
+  }
+
+  function writeDotColors(list) {
+    writeSection({ dotColors: list.slice(0, MAX_DOT_COLORS) })
+  }
+
+  function applyDotColors() {
+    if (!sections.length) return
+    const colors = bloomDotColorsOf(studio.edits?.[activeKey])
+    const colorMode = colorModeOf(studio.edits?.[activeKey])
+    const dotWarmth = studio.edits?.[activeKey]?.dotWarmth ?? 0.5
+    const dotLightness = studio.edits?.[activeKey]?.dotLightness ?? 0.5
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        const same =
+          colorModeOf(previous) === colorMode &&
+          (previous.dotWarmth ?? 0.5) === dotWarmth &&
+          (previous.dotLightness ?? 0.5) === dotLightness &&
+          bloomDotColorsOf(previous).length === colors.length &&
+          bloomDotColorsOf(previous).every((hex, index) => hex.toLowerCase() === colors[index].toLowerCase())
+        if (same) continue
+        edits[key] = { ...previous, dotColors: colors, colorMode, dotWarmth, dotLightness }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setDotColorAck(`${colorMode}:${colors.join('|').toLowerCase()}`)
+    showToast('Dot colors applied to all sections.')
   }
 
   function applyBackground() {
@@ -1010,6 +1107,17 @@ export function Studio() {
         }
       })
     }     else if (picker.target === 'palette') onPick(picker.id, picker.hex)
+    else if (picker.target === 'dotColor') {
+      const current = bloomDotColorsOf(studio.edits?.[activeKey])
+      if (picker.mode === 'add') {
+        if (current.length < MAX_DOT_COLORS) writeDotColors([...current, picker.hex])
+      } else {
+        const next = current.slice()
+        next[picker.index] = picker.hex
+        writeDotColors(next)
+      }
+      setDotColorAck(null)
+    }
     else if (picker.target === 'dots') commitDots(picker.hex, picker.previous, picker.custom)
     else if (picker.target === 'grout') commitGrout(picker.hex, picker.previous, picker.custom)
     else commitBackground(picker.hex, picker.previous, picker.custom)
@@ -1082,6 +1190,11 @@ export function Studio() {
           edit.shimmer != null ||
           isHex(edit.grout) ||
           edit.ground === 'solid' ||
+          edit.filled != null ||
+          edit.dotColors?.length ||
+          edit.colorMode ||
+          edit.dotWarmth != null ||
+          edit.dotLightness != null ||
           (edit.composition && edit.composition !== 'auto')),
     )
     if (!edited) {
@@ -1144,7 +1257,18 @@ export function Studio() {
     if (!picker) return undefined
     function finish() {
       const field = picker.target === 'background' ? 'background' : picker.target === 'dots' ? 'dots' : picker.target === 'grout' ? 'grout' : ''
-      if (field && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
+      if (picker.target === 'dotColor' && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
+        const revert = picker.revert
+        editStudio((current) => {
+          const edits = { ...(current.edits || {}) }
+          const previous = { ...(edits[activeKey] || {}) }
+          if (Array.isArray(revert) && revert.length) previous.dotColors = revert
+          else delete previous.dotColors
+          if (Object.keys(previous).length) edits[activeKey] = previous
+          else delete edits[activeKey]
+          return { ...current, edits }
+        })
+      } else if (field && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
         const revert = picker.revert
         editStudio((current) => {
           const edits = { ...(current.edits || {}) }
@@ -1175,22 +1299,27 @@ export function Studio() {
     }
   }, [picker, activeKey])
 
-  const warmth = Math.round((1 - (activePalette.warmth ?? 0.5)) * 100)
-  const lightness = Math.round((activePalette.lightness ?? 0.5) * 100)
   const spiky = Math.round((1 - (activeEdit.roundness ?? studio.roundness ?? 0.7)) * 100)
   const shapesOn = studio.style === 'shapes'
   const imageOn = studio.style === 'image'
-  const visualOn = shapesOn || imageOn
+  const bloomOn = studio.style === 'bloom'
+  const visualOn = shapesOn || imageOn || bloomOn
   const sectionEdit = studio.edits?.[activeKey] || {}
+  const warmth = Math.round((1 - (bloomOn ? (sectionEdit.dotWarmth ?? 0.5) : (activePalette.warmth ?? 0.5))) * 100)
+  const lightness = Math.round((bloomOn ? (sectionEdit.dotLightness ?? 0.5) : (activePalette.lightness ?? 0.5)) * 100)
   const composition = imageOn
     ? sectionEdit.composition === 'collage'
       ? 'collage'
       : sectionEdit.composition === 'mosaic'
         ? 'mosaic'
         : 'halftone'
-    : ['free', 'mirror', 'quad', 'radial'].includes(sectionEdit.composition)
-      ? sectionEdit.composition
-      : 'auto'
+    : bloomOn
+      ? sectionEdit.composition === 'ring'
+        ? 'ring'
+        : 'full'
+      : ['free', 'mirror', 'quad', 'radial'].includes(sectionEdit.composition)
+        ? sectionEdit.composition
+        : 'auto'
   const collageOn = imageOn && composition === 'collage'
   const mosaicOn = imageOn && composition === 'mosaic'
   const compositionOptions = imageOn
@@ -1199,21 +1328,28 @@ export function Studio() {
         { id: 'collage', label: 'Collage' },
         { id: 'mosaic', label: 'Mosaic' },
       ]
-    : [
-        { id: 'auto', label: 'Auto' },
-        { id: 'free', label: 'Free' },
-        { id: 'mirror', label: 'Mirror' },
-        { id: 'quad', label: 'Quad' },
-        { id: 'radial', label: 'Radial' },
-      ]
+    : bloomOn
+      ? [
+          { id: 'full', label: 'Full' },
+          { id: 'ring', label: 'Ring' },
+        ]
+      : [
+          { id: 'auto', label: 'Auto' },
+          { id: 'free', label: 'Free' },
+          { id: 'mirror', label: 'Mirror' },
+          { id: 'quad', label: 'Quad' },
+          { id: 'radial', label: 'Radial' },
+        ]
   const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
   const sizeValue = sectionEdit.size ?? (mosaicOn ? 32 : imageOn ? DOT_SIZE_DEFAULT : 50)
   const shimmerValue = sectionEdit.shimmer ?? 80
   const countValue = collageOn
     ? collageCount({ edits: studio.edits, seeds: studio.seeds }, section)
-    : imageOn
-      ? Math.min(DOT_DENSITY.max, Math.max(DOT_DENSITY.min, sectionEdit.count ?? DOT_DENSITY.count))
-      : Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
+    : bloomOn
+      ? Math.min(BLOOM_COUNT.max, Math.max(BLOOM_COUNT.min, Math.round(sectionEdit.count ?? BLOOM_COUNT.count)))
+      : imageOn
+        ? Math.min(DOT_DENSITY.max, Math.max(DOT_DENSITY.min, sectionEdit.count ?? DOT_DENSITY.count))
+        : Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
   const images = studio.images || []
   const enabledColors =
     sectionEdit.colors?.length >= 2
@@ -1263,12 +1399,30 @@ export function Studio() {
   const imageUniform = collageOn
     ? Boolean(sections.length && collagePicks.length && sections.every((item) => sameImageList(sectionImageIds(item), collagePicks)))
     : Boolean(sections.length && images.length && sections.every((item) => imageIdFor(item) === selectedImage))
+  const filledOn = sectionEdit.filled === true
+  const filledUniform = Boolean(
+    sections.length && sections.every((item) => Boolean(studio.edits?.[sectionKey(item)]?.filled) === filledOn),
+  )
+  const bloomColors = bloomDotColorsOf(sectionEdit)
+  const bloomColorMode = colorModeOf(sectionEdit)
+  const bloomColorKey = `${bloomColorMode}:${bloomColors.join('|').toLowerCase()}`
+  const bloomColorUniform = Boolean(
+    sections.length &&
+      sections.every((item) => {
+        const saved = studio.edits?.[sectionKey(item)] || {}
+        return colorModeOf(saved) === bloomColorMode && bloomDotColorsOf(saved).join('|').toLowerCase() === bloomColors.join('|').toLowerCase()
+      }),
+  )
   if (compositionAck != null && !compositionUniform) setCompositionAck(null)
+  if (filledAck != null && !filledUniform) setFilledAck(null)
+  if (dotColorAck != null && !bloomColorUniform) setDotColorAck(null)
   if (backgroundAck != null && !backgroundUniform) setBackgroundAck(null)
   if (dotsAck != null && !dotsUniform) setDotsAck(null)
   if (groutAck != null && !groutUniform) setGroutAck(null)
   if (imageAck != null && !imageUniform) setImageAck(null)
   const compositionApplied = compositionAck === composition && compositionUniform
+  const filledApplied = filledAck === filledOn && filledUniform
+  const bloomColorApplied = dotColorAck === bloomColorKey && bloomColorUniform
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
   const groutApplied = groutAck === sectionGrout.toLowerCase() && groutUniform
   const dotsApplied = dotsAck === sectionDots.toLowerCase() && dotsUniform
@@ -1546,7 +1700,7 @@ export function Studio() {
                 onPointerUp={onPlaceUp}
                 onPointerCancel={onPlaceUp}
                 role={track && visualOn ? 'img' : undefined}
-                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
               />
             )}
             {track && visualOn ? null : (
@@ -1558,7 +1712,7 @@ export function Studio() {
                     <Link className="canvas-upload" to="/upload">
                       Go to Upload
                     </Link>
-                    <p>Upload a track to see liquid.</p>
+                    <p>{bloomOn ? 'Upload a track to see bloom.' : 'Upload a track to see liquid.'}</p>
                   </>
                 )}
               </div>
@@ -1572,13 +1726,15 @@ export function Studio() {
         <div className="why">
           <strong>Why it looks like this</strong>
           <p>
-            {collageOn
-              ? 'The frames share the photos you picked, as evenly as they can. The largest frame follows point 1 on the first photo, and the speed slider changes how quickly a smaller frame cuts to another point.'
-              : mosaicOn
-                ? 'The photo is rebuilt from small tiles that follow its shapes. A soft light moves across them: bass speeds it up, a beat catches a cluster, and a new photo arrives on a sweep of that light.'
-                : imageOn
-                  ? 'The grid is a halftone of the whole photo. Soft zones drift across and sharpen it where they pass. A strong bass hit fuses the darkest dots for a moment, and a beat sends a ripple through the grid.'
-                  : explainPoster(poster)}
+            {bloomOn
+              ? explainBloom()
+              : collageOn
+                ? 'The frames share the photos you picked, as evenly as they can. The largest frame follows point 1 on the first photo, and the speed slider changes how quickly a smaller frame cuts to another point.'
+                : mosaicOn
+                  ? 'The photo is rebuilt from small tiles that follow its shapes. A soft light moves across them: bass speeds it up, a beat catches a cluster, and a new photo arrives on a sweep of that light.'
+                  : imageOn
+                    ? 'The grid is a halftone of the whole photo. Soft zones drift across and sharpen it where they pass. A strong bass hit fuses the darkest dots for a moment, and a beat sends a ripple through the grid.'
+                    : explainPoster(poster)}
           </p>
         </div>
 
@@ -1836,6 +1992,35 @@ export function Studio() {
             >
               {compositionApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
+            {bloomOn ? (
+              <>
+                <div className="background-row">
+                  <p className="side-label">Filled dots</p>
+                  <button
+                    type="button"
+                    className="shine-switch"
+                    role="switch"
+                    aria-checked={filledOn}
+                    aria-label="Filled dots"
+                    disabled={!section}
+                    onClick={() => {
+                      setFilledAck(null)
+                      writeSection({ filled: sectionEdit.filled !== true })
+                    }}
+                  >
+                    <span />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={filledApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+                  disabled={!section || !sections.length}
+                  onClick={applyFilled}
+                >
+                  {filledApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
+                </button>
+              </>
+            ) : null}
             {imageOn && !collageOn && !mosaicOn ? (
               <>
                 <p className="side-label">Dots</p>
@@ -1938,6 +2123,77 @@ export function Studio() {
             >
               {backgroundApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
+            {bloomOn ? (
+              <>
+                <p className="side-label">Dot colors</p>
+                <div className="swatches background-swatches" role="listbox" aria-label="Dot colors">
+                  {bloomColors.map((hex, index) => (
+                    <button
+                      key={`bloom-dot-${index}-${hex}`}
+                      type="button"
+                      className="swatch is-on"
+                      style={{ background: hex }}
+                      aria-label={`Dot color ${index + 1}`}
+                      aria-selected="true"
+                      disabled={!section}
+                      onClick={(event) => {
+                        setDotColorAck(null)
+                        openPicker(event, {
+                          mode: 'edit',
+                          target: 'dotColor',
+                          index,
+                          hex,
+                          previous: hex,
+                          revert: bloomColors.slice(),
+                        })
+                      }}
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    className="add-swatch"
+                    aria-label="Add a dot color"
+                    disabled={!section || bloomColors.length >= MAX_DOT_COLORS}
+                    onClick={(event) =>
+                      openPicker(event, {
+                        mode: 'add',
+                        target: 'dotColor',
+                        hex: bloomColors[bloomColors.length - 1] || DEFAULT_DOT_COLOR,
+                      })
+                    }
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={bloomColorApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+                  disabled={!section || !sections.length}
+                  onClick={applyDotColors}
+                >
+                  {bloomColorApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
+                </button>
+                <p className="side-label">Color mode</p>
+                <label className="style-field">
+                  <select
+                    className="style-select"
+                    aria-label="Color mode"
+                    value={bloomColorMode}
+                    disabled={!section}
+                    onChange={(event) => {
+                      setDotColorAck(null)
+                      writeSection({ colorMode: event.target.value })
+                    }}
+                  >
+                    {COLOR_MODES.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : null}
             {mosaicOn ? (
               <>
                 <p className="side-label">Grout color</p>
@@ -2060,7 +2316,7 @@ export function Studio() {
           </>
         ) : null}
 
-        {imageOn ? null : (
+        {imageOn || bloomOn ? null : (
           <>
             <p className="side-label">Palette</p>
             <div className="swatches">
@@ -2265,8 +2521,8 @@ export function Studio() {
             <input
               className="range"
               type="range"
-              min={collageOn ? PANEL_COUNT.min : imageOn ? DOT_DENSITY.min : shapeRange.min}
-              max={collageOn ? PANEL_COUNT.max : imageOn ? DOT_DENSITY.max : shapeRange.max}
+              min={bloomOn ? BLOOM_COUNT.min : collageOn ? PANEL_COUNT.min : imageOn ? DOT_DENSITY.min : shapeRange.min}
+              max={bloomOn ? BLOOM_COUNT.max : collageOn ? PANEL_COUNT.max : imageOn ? DOT_DENSITY.max : shapeRange.max}
               step="1"
               value={countValue}
               onPointerDown={startSlide}
@@ -2293,7 +2549,7 @@ export function Studio() {
                   aria-label="Image contrast"
                 />
               </>
-            ) : imageOn ? null : (
+            ) : imageOn || bloomOn ? null : (
               <>
                 <p className="side-label">Colors for this section</p>
                 <div className="section-colors">
@@ -2506,7 +2762,15 @@ export function Studio() {
             type="color"
             value={isHex(picker.hex) ? picker.hex : '#000000'}
             aria-label="Pick a color"
-            onChange={(event) => setPicker((current) => (current ? { ...current, hex: event.target.value } : current))}
+            onChange={(event) => {
+              const hex = event.target.value
+              setPicker((current) => (current ? { ...current, hex } : current))
+              if (picker.target === 'dotColor' && picker.mode === 'edit' && isHex(hex)) {
+                const next = bloomDotColorsOf(studio.edits?.[activeKey]).slice()
+                next[picker.index] = hex
+                writeDotColors(next)
+              }
+            }}
           />
           <input
             className="color-hex"
@@ -2517,6 +2781,11 @@ export function Studio() {
               const raw = event.target.value.trim()
               const hex = raw.startsWith('#') ? raw : `#${raw}`
               setPicker((current) => (current ? { ...current, hex } : current))
+              if (picker.target === 'dotColor' && picker.mode === 'edit' && isHex(hex)) {
+                const next = bloomDotColorsOf(studio.edits?.[activeKey]).slice()
+                next[picker.index] = hex
+                writeDotColors(next)
+              }
             }}
           />
           <button type="submit" className="button" disabled={!isHex(picker.hex)}>
@@ -2548,7 +2817,7 @@ export function Studio() {
                 onPointerUp={onPlaceUp}
                 onPointerCancel={onPlaceUp}
                 role={track && visualOn ? 'img' : undefined}
-                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
               />
             </div>,
             document.body,

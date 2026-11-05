@@ -28,6 +28,7 @@ const STYLE_LABELS = {
   wave: 'Wave',
   poster: 'Poster',
   image: 'Image animation',
+  bloom: 'Bloom',
 }
 
 function Check({ checked, onChange, label, disabled }) {
