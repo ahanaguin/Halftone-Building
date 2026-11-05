@@ -2,7 +2,7 @@ import { ensureFocus } from './collageField.js'
 import { biggestDropTimes } from './metaballs.js'
 import { hexToRgb, hslToHex, rgbToHsl } from './palette.js'
 import { metricsAt } from './profileTrack.js'
-import { PAPER, isHex, labelKind, mulberry32, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
+import { INK_BLACK, PAPER, isHex, labelKind, mulberry32, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 
 const DT = 1 / 30
 const TILE_DEFAULT = 38
@@ -43,8 +43,12 @@ function speedOf(spec, section) {
 }
 
 function shimmerOf(spec, section) {
-  const value = editOf(spec, section)?.shimmer ?? 50
+  const value = editOf(spec, section)?.shimmer ?? 62
   return clamp(Number(value) || 0, 0, 100) / 100
+}
+
+function solidGround(spec, section) {
+  return editOf(spec, section)?.ground === 'solid'
 }
 
 function flowOf(spec, section) {
@@ -59,15 +63,13 @@ function groutControl(spec, section) {
   return clamp(Number(editOf(spec, section)?.size ?? GROUT_DEFAULT), 0, 100)
 }
 
-function pitchFor(control, width, height) {
+function tileMetrics(control, groutControl, width, height) {
   const shortSide = Math.min(width, height)
   const t = clamp(control / 100, 0, 1)
-  return Math.max(8, shortSide * (0.016 + t * 0.04))
-}
-
-function groutFor(control, pitch) {
-  const t = clamp(control / 100, 0, 1)
-  return Math.max(1, pitch * (0.035 + t * 0.22))
+  const base = Math.max(7, shortSide * (0.02 + t * 0.036))
+  const g = clamp(groutControl / 100, 0, 1)
+  const grout = Math.max(1, base * (0.05 + g * 0.08))
+  return { base, grout }
 }
 
 function coverRect(image, aspect) {
@@ -256,6 +258,7 @@ function buildField(image, aspect, points) {
     }
   })
   const subject = new Float32Array(tone.length)
+  const detail = new Float32Array(tone.length)
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = y * width + x
@@ -268,11 +271,12 @@ function buildField(image, aspect, points) {
         const sigma = point.span * 0.72
         focus = Math.max(focus, Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma)))
       }
-      const detail = smoothstep(mag[index] / Math.max(0.001, magMax), 0.08, 0.4)
-      subject[index] = clamp(focus * 0.82 + detail * (0.42 + focus * 0.7), 0, 1)
+      const edge = smoothstep(mag[index] / Math.max(0.001, magMax), 0.05, 0.42)
+      detail[index] = edge
+      subject[index] = clamp(focus * 0.82 + edge * (0.42 + focus * 0.7), 0, 1)
     }
   }
-  return { width, height, rgb, dist, angle, subject }
+  return { width, height, rgb, dist, angle, subject, detail }
 }
 
 function fieldFor(image, aspect, points) {
@@ -283,6 +287,10 @@ function fieldFor(image, aspect, points) {
   if (fields.size > 12) fields.clear()
   fields.set(key, field)
   return field
+}
+
+function punch(value) {
+  return clamp((value - 128) * 1.28 + 128, 8, 236)
 }
 
 function sampleColor(field, nx, ny, pitch, canvasWidth) {
@@ -306,14 +314,25 @@ function sampleColor(field, nx, ny, pitch, canvasWidth) {
       count += 1
     }
   }
-  return [red / count, green / count, blue / count]
+  return [punch(red / count), punch(green / count), punch(blue / count)]
 }
 
 function fieldAt(field, nx, ny) {
   const x = clamp(Math.round(nx * (field.width - 1)), 0, field.width - 1)
   const y = clamp(Math.round(ny * (field.height - 1)), 0, field.height - 1)
   const index = y * field.width + x
-  return { index, subject: field.subject[index], dist: field.dist[index], angle: field.angle[index] }
+  return {
+    index,
+    subject: field.subject[index],
+    dist: field.dist[index],
+    angle: field.angle[index],
+    detail: field.detail[index],
+  }
+}
+
+function mixAngle(from, to, amount) {
+  const delta = Math.atan2(Math.sin(to - from), Math.cos(to - from))
+  return from + delta * amount
 }
 
 function varyColor(rgb, jitter) {
@@ -322,13 +341,9 @@ function varyColor(rgb, jitter) {
   return hexToRgb(hex)
 }
 
-function buildTiles({ width, height, pitch, grout, seed, flow, field }) {
+function buildTiles({ width, height, base, grout, seed, flow, field }) {
   const rand = mulberry32(seed || 1)
-  const columns = Math.max(1, Math.round(width / pitch))
-  const rows = Math.max(1, Math.round(height / pitch))
-  const stepX = width / columns
-  const stepY = height / rows
-  const step = (stepX + stepY) / 2
+  const step = base + grout
   const tiles = []
   const bucketSize = Math.max(4, step)
   const bucketCols = Math.ceil(width / bucketSize) + 1
@@ -355,7 +370,7 @@ function buildTiles({ width, height, pitch, grout, seed, flow, field }) {
     return false
   }
 
-  function nearestDist(x, y) {
+  function clearance(x, y) {
     const cx = clamp(Math.floor(x / bucketSize), 0, bucketCols - 1)
     const cy = clamp(Math.floor(y / bucketSize), 0, bucketRows - 1)
     let best = Infinity
@@ -364,195 +379,222 @@ function buildTiles({ width, height, pitch, grout, seed, flow, field }) {
       for (let xx = cx - 2; xx <= cx + 2; xx += 1) {
         if (xx < 0 || xx >= bucketCols) continue
         for (const other of buckets[yy * bucketCols + xx]) {
-          const dx = other.x - x
-          const dy = other.y - y
-          const dist = dx * dx + dy * dy
+          const dist = Math.hypot(other.x - x, other.y - y) - other.size * 0.5
           if (dist < best) best = dist
         }
       }
     }
-    return Math.sqrt(best)
+    return best
   }
 
-  function place(partial) {
+  function place(partial, allowOverlap) {
     const jitter = 0.97 + rand() * 0.06
-    const wobble = (rand() - 0.5) * ((8 * Math.PI) / 180)
-    const rot = partial.rot + wobble
-    const grow = Math.abs(Math.cos(rot)) + Math.abs(Math.sin(rot))
-    const nominal = Math.max(3, step - grout)
-    const vary = 0.9 + rand() * 0.2
-    const fitted = Number.isFinite(partial.fit) ? partial.fit : nominal
-    const size = Math.max(3, Math.min(nominal * vary, fitted, (step * 0.992) / grow))
+    const wobble = (rand() - 0.5) * ((6 * Math.PI) / 180)
+    const size = Math.max(2.5, partial.size)
     const tile = {
       x: partial.x,
       y: partial.y,
-      rot,
+      rot: partial.rot + wobble,
       size,
       tilt: rand() * Math.PI * 2,
       jitter,
       row: partial.row,
       along: partial.along,
       bg: partial.bg,
-      rgb: partial.bg ? null : varyColor(partial.rgb, jitter),
+      rgb: partial.rgb ? varyColor(partial.rgb, jitter) : null,
     }
-    if (tile.x < -size || tile.y < -size || tile.x > width + size || tile.y > height + size) return
-    if (blocked(tile)) return
+    if (tile.x < -size || tile.y < -size || tile.x > width + size || tile.y > height + size) return false
+    if (!allowOverlap && blocked(tile)) return false
     tiles.push(tile)
     const bx = clamp(Math.floor(tile.x / bucketSize), 0, bucketCols - 1)
     const by = clamp(Math.floor(tile.y / bucketSize), 0, bucketRows - 1)
     buckets[by * bucketCols + bx].push(tile)
+    return true
   }
 
-  if (flow && field) {
-    const scaleX = field.width / width
-    const scaleY = field.height / height
-    const ringStep = Math.max(1.4, step * ((scaleX + scaleY) / 2))
-    let maxDist = 0
-    for (let index = 0; index < field.dist.length; index += 1) {
-      if (field.dist[index] < 1e5 && field.dist[index] > maxDist) maxDist = field.dist[index]
+  function angleAt(x, y) {
+    if (!flow || !field) return 0
+    const nx = clamp(x / width, 0, 1)
+    const ny = clamp(y / height, 0, 1)
+    const sample = fieldAt(field, nx, ny)
+    const ix = clamp(Math.round(nx * (field.width - 1)), 1, field.width - 2)
+    const iy = clamp(Math.round(ny * (field.height - 1)), 1, field.height - 2)
+    const at = (xx, yy) => field.dist[yy * field.width + xx]
+    const normal = Math.atan2(at(ix, iy + 1) - at(ix, iy - 1), at(ix + 1, iy) - at(ix - 1, iy))
+    return mixAngle(0, normal + Math.PI / 2, smoothstep(sample.subject, 0.16, 0.7))
+  }
+
+  function paintInfo(x, y, size) {
+    const nx = clamp(x / width, 0, 1)
+    const ny = clamp(y / height, 0, 1)
+    const sample = field ? fieldAt(field, nx, ny) : null
+    const bg = Boolean(sample && sample.subject < 0.34)
+    return {
+      bg,
+      rgb: field && !bg ? sampleColor(field, nx, ny, size, width) : field ? sampleColor(field, nx, ny, size, width) : null,
+      detail: sample?.detail || 0,
     }
-    const seen = new Uint8Array(field.width * field.height)
-    const normalAt = (index) => {
-      const x = index % field.width
-      const y = (index - x) / field.width
-      const left = distAt(x - 1, y)
-      const right = distAt(x + 1, y)
-      const up = distAt(x, y - 1)
-      const down = distAt(x, y + 1)
-      return Math.atan2(down - up, right - left)
+  }
+
+  function commit(x, y, size, rot, row, along) {
+    const info = paintInfo(x, y, size)
+    return place({ x, y, size, rot, row, along, bg: info.bg, rgb: info.rgb }, true)
+  }
+
+  const columns = Math.max(1, Math.round(width / step))
+  const rows = Math.max(1, Math.round(height / step))
+  const stepX = width / columns
+  const stepY = height / rows
+  const full = Math.min(stepX, stepY) - grout
+
+  function flowShift(x, y) {
+    if (!flow || !field) return { x: 0, y: 0 }
+    const nx = clamp(x / width, 0, 1)
+    const ny = clamp(y / height, 0, 1)
+    const sample = fieldAt(field, nx, ny)
+    const ix = clamp(Math.round(nx * (field.width - 1)), 1, field.width - 2)
+    const iy = clamp(Math.round(ny * (field.height - 1)), 1, field.height - 2)
+    const at = (xx, yy) => field.dist[yy * field.width + xx]
+    const gx = at(ix + 1, iy) - at(ix - 1, iy)
+    const gy = at(ix, iy + 1) - at(ix, iy - 1)
+    const glen = Math.hypot(gx, gy) || 1
+    const scale = ((field.width / width) + (field.height / height)) / 2
+    const ring = Math.max(step * scale, 1)
+    const delta = (sample.dist - Math.round(sample.dist / ring) * ring) / scale
+    const weight = smoothstep(sample.subject, 0.1, 0.62)
+    const push = clamp(delta, -step * 0.34, step * 0.34) * weight
+    return { x: (gx / glen) * push, y: (gy / glen) * push }
+  }
+
+  let shifts = []
+  for (let row = 0; row < rows; row += 1) {
+    const line = []
+    for (let column = 0; column < columns; column += 1) {
+      line.push(flowShift((column + 0.5) * stepX, (row + 0.5) * stepY))
     }
-    function distAt(x, y) {
-      const xx = clamp(x, 0, field.width - 1)
-      const yy = clamp(y, 0, field.height - 1)
-      return field.dist[yy * field.width + xx]
+    shifts.push(line)
+  }
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = shifts.map((line) => line.map((shift) => ({ x: shift.x, y: shift.y })))
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        let sx = 0
+        let sy = 0
+        let weight = 0
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const rr = row + dy
+            const cc = column + dx
+            if (rr < 0 || cc < 0 || rr >= rows || cc >= columns) continue
+            const sample = dx === 0 && dy === 0 ? 2 : 1
+            sx += shifts[rr][cc].x * sample
+            sy += shifts[rr][cc].y * sample
+            weight += sample
+          }
+        }
+        const limit = step * 0.28
+        next[row][column] = { x: clamp(sx / weight, -limit, limit), y: clamp(sy / weight, -limit, limit) }
+      }
     }
-    for (let ring = ringStep * 0.45, ringIndex = 0; ring < maxDist; ring += ringStep, ringIndex += 1) {
-      for (let y = 1; y < field.height - 1; y += 2) {
-        for (let x = 1; x < field.width - 1; x += 2) {
-          const start = y * field.width + x
-          if (seen[start]) continue
-          if (Math.abs(field.dist[start] - ring) > ringStep * 0.42) continue
-          if (field.subject[start] < 0.3) continue
-          for (const sign of [1, -1]) {
-            let px = x
-            let py = y
-            let travel = sign === 1 ? ringStep : 0
-            let prevX = 0
-            let prevY = 0
-            let along = 0
-            for (let guard = 0; guard < field.width * 3; guard += 1) {
-              const ix = Math.round(px)
-              const iy = Math.round(py)
-              if (ix < 1 || iy < 1 || ix >= field.width - 1 || iy >= field.height - 1) break
-              const index = iy * field.width + ix
-              if (guard > 4 && seen[index]) break
-              for (let dy = -1; dy <= 1; dy += 1) {
-                for (let dx = -1; dx <= 1; dx += 1) {
-                  const xx = ix + dx
-                  const yy = iy + dy
-                  if (xx < 0 || yy < 0 || xx >= field.width || yy >= field.height) continue
-                  seen[yy * field.width + xx] = 1
-                }
-              }
-              const normal = normalAt(index)
-              let tx = -Math.sin(normal) * sign
-              let ty = Math.cos(normal) * sign
-              if (guard > 0 && tx * prevX + ty * prevY < 0) {
-                tx = -tx
-                ty = -ty
-              }
-              prevX = tx
-              prevY = ty
-              if (travel >= ringStep * 0.96) {
-                const nx = ix / Math.max(1, field.width - 1)
-                const ny = iy / Math.max(1, field.height - 1)
-                const subject = field.subject[index]
-                const flowAmt = smoothstep(subject, 0.28, 0.7)
-                const canvasX = nx * width
-                const canvasY = ny * height
-                const gridX = (Math.floor(canvasX / stepX) + 0.5) * stepX
-                const gridY = (Math.floor(canvasY / stepY) + 0.5) * stepY
-                const tangent = field.angle[index] + Math.PI / 2
-                place({
-                  x: gridX + (canvasX - gridX) * flowAmt,
-                  y: gridY + (canvasY - gridY) * flowAmt,
-                  rot: tangent * flowAmt,
-                  row: ringIndex,
-                  along,
-                  bg: subject < 0.34,
-                  rgb: sampleColor(field, nx, ny, step, width),
-                })
-                along += 1
-                travel = 0
-              }
-              px += tx
-              py += ty
-              travel += 1
-              const jx = Math.round(px)
-              const jy = Math.round(py)
-              if (jx < 1 || jy < 1 || jx >= field.width - 1 || jy >= field.height - 1) break
-              const next = jy * field.width + jx
-              if (field.subject[next] < 0.24) break
-              const error = field.dist[next] - ring
-              const pull = normalAt(next)
-              px -= Math.cos(pull) * error * 0.65
-              py -= Math.sin(pull) * error * 0.65
-            }
+    shifts = next
+  }
+
+  const minGap = full + grout * 0.2
+  function spaced(scale) {
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const x = (column + 0.5) * stepX + shifts[row][column].x * scale
+        const y = (row + 0.5) * stepY + shifts[row][column].y * scale
+        if (column > 0) {
+          const px = (column - 0.5) * stepX + shifts[row][column - 1].x * scale
+          const py = (row + 0.5) * stepY + shifts[row][column - 1].y * scale
+          if (Math.hypot(x - px, y - py) < minGap) return false
+        }
+        if (row > 0) {
+          const px = (column + 0.5) * stepX + shifts[row - 1][column].x * scale
+          const py = (row - 0.5) * stepY + shifts[row - 1][column].y * scale
+          if (Math.hypot(x - px, y - py) < minGap) return false
+        }
+      }
+    }
+    return true
+  }
+  let shiftScale = 0
+  if (spaced(1)) shiftScale = 1
+  else {
+    let lo = 0
+    let hi = 1
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const mid = (lo + hi) / 2
+      if (spaced(mid)) lo = mid
+      else hi = mid
+    }
+    shiftScale = lo
+  }
+  for (let row = 0; row < rows; row += 1) {
+    const centers = []
+    for (let column = 0; column < columns; column += 1) {
+      const x = (column + 0.5) * stepX
+      const y = (row + 0.5) * stepY
+      centers.push([x + shifts[row][column].x * shiftScale, y + shifts[row][column].y * shiftScale, x, y])
+    }
+    centers.forEach(([sx, sy, x, y], along) => {
+      const prev = centers[along - 1]
+      const nextPoint = centers[along + 1]
+      let rot = 0
+      if (prev && nextPoint) rot = Math.atan2(nextPoint[1] - prev[1], nextPoint[0] - prev[0])
+      else if (nextPoint) rot = Math.atan2(nextPoint[1] - sy, nextPoint[0] - sx)
+      else if (prev) rot = Math.atan2(sy - prev[1], sx - prev[0])
+      const detail = field ? fieldAt(field, clamp(x / width, 0, 1), clamp(y / height, 0, 1)).detail : 0
+      if (detail > 0.62 && full > 10) {
+        const inner = Math.max(0.6, grout * 0.45)
+        const small = (full - inner) / 2
+        const tx = Math.cos(rot)
+        const ty = Math.sin(rot)
+        const nx = -ty
+        const ny = tx
+        const nudge = small / 2 + inner / 2
+        for (const ox of [-1, 1]) {
+          for (const oy of [-1, 1]) {
+            commit(sx + tx * ox * nudge + nx * oy * nudge, sy + ty * ox * nudge + ny * oy * nudge, small, rot, row, along)
+          }
+        }
+        return
+      }
+      commit(sx, sy, full, rot, row, along)
+    })
+  }
+
+  const probe = Math.max(3, full * 0.45)
+  for (let y = probe * 0.5; y < height; y += probe) {
+    for (let x = probe * 0.5; x < width; x += probe) {
+      const room = clearance(x, y)
+      const cut = Math.min(full * 0.92, room * 2 - grout)
+      if (cut < Math.max(2.5, full * 0.28)) continue
+      const prev = centersAt(x, y)
+      commit(x, y, cut, prev, Math.round(y / stepY), Math.round(x / stepX))
+    }
+  }
+
+  function centersAt(x, y) {
+    const cx = clamp(Math.floor(x / bucketSize), 0, bucketCols - 1)
+    const cy = clamp(Math.floor(y / bucketSize), 0, bucketRows - 1)
+    let nearest = null
+    let best = Infinity
+    for (let yy = cy - 1; yy <= cy + 1; yy += 1) {
+      if (yy < 0 || yy >= bucketRows) continue
+      for (let xx = cx - 1; xx <= cx + 1; xx += 1) {
+        if (xx < 0 || xx >= bucketCols) continue
+        for (const other of buckets[yy * bucketCols + xx]) {
+          const dist = Math.hypot(other.x - x, other.y - y)
+          if (dist < best) {
+            best = dist
+            nearest = other
           }
         }
       }
     }
-  }
-
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const x = (column + 0.5) * stepX
-      const y = (row + 0.5) * stepY
-      const nx = x / width
-      const ny = y / height
-      const sample = field ? fieldAt(field, nx, ny) : null
-      const subject = sample ? sample.subject : 0
-      const flowAmt = flow && sample ? smoothstep(subject, 0.28, 0.7) : 0
-      const tangent = sample ? sample.angle + Math.PI / 2 : 0
-      const bg = !field || Boolean(flow && subject < 0.34)
-      place({
-        x,
-        y,
-        rot: tangent * flowAmt,
-        row: flow && sample ? Math.round(sample.dist) : row,
-        along: column,
-        bg,
-        rgb: field && !bg ? sampleColor(field, nx, ny, step, width) : [0, 0, 0],
-      })
-    }
-  }
-
-  if (flow && field) for (let row = 0; row < rows * 2; row += 1) {
-    for (let column = 0; column < columns * 2; column += 1) {
-      const x = (column + 0.5) * (stepX / 2)
-      const y = (row + 0.5) * (stepY / 2)
-      const gap = nearestDist(x, y)
-      if (gap < step * 0.72) continue
-      const nx = x / width
-      const ny = y / height
-      const sample = field ? fieldAt(field, nx, ny) : null
-      const subject = sample ? sample.subject : 0
-      const flowAmt = flow && sample ? smoothstep(subject, 0.28, 0.7) : 0
-      const tangent = sample ? sample.angle + Math.PI / 2 : 0
-      const bg = !field || Boolean(flow && subject < 0.34)
-      const fit = Math.min(step - grout, gap * 0.86)
-      if (fit < step * 0.28) continue
-      place({
-        x,
-        y,
-        rot: tangent * flowAmt,
-        row: sample ? Math.round(sample.dist) : row,
-        along: column,
-        bg,
-        fit,
-        rgb: field && !bg ? sampleColor(field, nx, ny, step, width) : [0, 0, 0],
-      })
-    }
+    return nearest ? nearest.rot : angleAt(x, y)
   }
 
   tiles.sort((a, b) => a.row - b.row || a.along - b.along || a.y - b.y || a.x - b.x)
@@ -566,17 +608,16 @@ function buildTiles({ width, height, pitch, grout, seed, flow, field }) {
 function layoutFor(spec, section, image, width, height) {
   const aspect = width / Math.max(1, height)
   const points = focusPoints(spec, image)
-  const pitch = pitchFor(tileControl(spec, section), width, height)
-  const grout = groutFor(groutControl(spec, section), pitch)
+  const metrics = tileMetrics(tileControl(spec, section), groutControl(spec, section), width, height)
   const flow = flowOf(spec, section)
   const seed = sectionSeedOf(spec, section, spec.sections || [])
   const pending = Boolean(image?.url && !photos.has(image.url))
-  const key = [image?.url || '', width, height, pitch.toFixed(2), grout.toFixed(2), seed, flow ? 1 : 0, JSON.stringify(points)].join('|')
+  const key = [image?.url || '', width, height, metrics.base.toFixed(2), metrics.grout.toFixed(2), seed, flow ? 1 : 0, JSON.stringify(points)].join('|')
   if (!pending && layouts.has(key)) return layouts.get(key)
   const field = !pending && image ? fieldFor(image, aspect, points) : null
-  const tiles = buildTiles({ width, height, pitch, grout, seed, flow: Boolean(flow && field), field })
-  if (pending) return { tiles, pitch }
-  const layout = { tiles, pitch }
+  const tiles = buildTiles({ width, height, base: metrics.base, grout: metrics.grout, seed, flow: Boolean(flow && field), field })
+  if (pending) return { tiles, pitch: metrics.base + metrics.grout }
+  const layout = { tiles, pitch: metrics.base + metrics.grout }
   if (layouts.size > 16) layouts.clear()
   layouts.set(key, layout)
   return layout
@@ -692,26 +733,26 @@ function backgroundRgb(spec) {
   return hexToRgb(hex)
 }
 
-function groutRgb(spec) {
-  const [red, green, blue] = backgroundRgb(spec)
-  const [hue, sat, light] = rgbToHsl(red, green, blue)
-  return hexToRgb(hslToHex(hue, Math.min(1, sat * 0.9), clamp(light * 0.7, 0, 0.92)))
+function groutRgb(spec, section) {
+  const saved = editOf(spec, section)?.grout
+  return hexToRgb(isHex(saved) ? saved : INK_BLACK)
 }
 
-function tileRgb(tile, bg) {
-  if (tile.bg) return varyColor(bg, tile.jitter)
-  return tile.rgb || bg
+function tileRgb(tile, bg, solid) {
+  if (solid && tile.bg) return varyColor(bg, tile.jitter)
+  return tile.rgb || varyColor(bg, tile.jitter)
 }
 
 function faceAmount(tile, lights, width, height) {
-  let best = -1
   const nx = tile.x / width
   const ny = tile.y / height
-  for (const light of lights) {
+  let sum = 0
+  lights.forEach((light, index) => {
     const angle = Math.atan2(light.y - ny, light.x - nx)
-    best = Math.max(best, Math.cos(tile.tilt - angle))
-  }
-  return best
+    const weight = index === 0 ? 0.72 : 0.28
+    sum += Math.cos(tile.tilt - angle) * weight
+  })
+  return clamp(sum, -1, 1)
 }
 
 function hashUnit(index, bucket) {
@@ -723,9 +764,9 @@ function hashUnit(index, bucket) {
 function shade(rgb, response, warm) {
   const scale = 1 + response
   return [
-    clamp(rgb[0] * scale + warm * 18, 0, 246),
-    clamp(rgb[1] * scale + warm * 6, 0, 244),
-    clamp(rgb[2] * scale - warm * 10, 0, 240),
+    clamp(rgb[0] * scale + warm * 8, 0, 250),
+    clamp(rgb[1] * scale + warm * 3, 0, 248),
+    clamp(rgb[2] * scale - warm * 5, 0, 246),
   ]
 }
 
@@ -749,7 +790,8 @@ export function paintMosaic(ctx, spec) {
   const section = sectionAt(spec.sections || [], time) || (spec.sections || [])[0]
   const image = syncWave(state, spec, time)
   const bg = backgroundRgb(spec)
-  const grout = groutRgb(spec)
+  const grout = groutRgb(spec, section)
+  const solid = solidGround(spec, section)
   ctx.fillStyle = `rgb(${grout[0]}, ${grout[1]}, ${grout[2]})`
   ctx.fillRect(0, 0, width, height)
 
@@ -766,7 +808,7 @@ export function paintMosaic(ctx, spec) {
   const quiet = kind === 'Quiet' || state.loud < 0.28
   const shimmer = shimmerOf(spec, section)
   const sweeping = time - state.sweepStart >= 0 && time - state.sweepStart < 0.4
-  const amp = Math.min(0.12, shimmer * (quiet ? 0.045 : 0.07 + state.bass * 0.05) + (sweeping ? 0.035 : 0))
+  const amp = Math.min(0.25, (0.06 + shimmer * 0.19) * (quiet ? 0.6 : 1) + (sweeping ? 0.03 : state.bass * 0.03))
   const catchAge = time - state.catchTime
   const catchOn = !quiet && catchAge >= 0 && catchAge < 0.3
   const catchEnv = catchOn ? Math.sin((catchAge / 0.3) * Math.PI) : 0
@@ -784,7 +826,7 @@ export function paintMosaic(ctx, spec) {
     const y = from.y + (tile.y - from.y) * mix
     const rot = from.rot + (tile.rot - from.rot) * mix
     const size = (from.size + (tile.size - from.size) * mix) * (1 - 0.06 * Math.sin(mix * Math.PI))
-    const color = mixRgb(tileRgb(from, bg), tileRgb(tile, bg), mix)
+    const color = mixRgb(tileRgb(from, bg, solid), tileRgb(tile, bg, solid), mix)
     const face = faceAmount({ ...tile, x, y }, state.lights, width, height)
     let response = face * amp
     if (catchOn) {
@@ -796,8 +838,8 @@ export function paintMosaic(ctx, spec) {
     if (twinkleGate > 0 && hashUnit(index, bucket) < twinkleGate * 0.012) {
       response += (0.5 + 0.5 * Math.sin(time * 16 + index)) * twinkleGate * 0.08
     }
-    response = clamp(response, -0.12, 0.12)
-    const warm = Math.max(0, face) * shimmer * (quiet ? 0.25 : 0.55)
+    response = clamp(response, -0.25, 0.25)
+    const warm = Math.max(0, face) * Math.min(0.45, shimmer * 0.4)
     const rgb = shade(color, response, warm)
     ctx.save()
     ctx.translate(x, y)
@@ -805,6 +847,14 @@ export function paintMosaic(ctx, spec) {
     ctx.fillStyle = `rgb(${rgb[0] | 0}, ${rgb[1] | 0}, ${rgb[2] | 0})`
     ctx.fillRect(-size / 2, -size / 2, size, size)
     ctx.restore()
+  }
+  if (spec.tune?.mosaicMarks) {
+    for (const light of state.lights) {
+      ctx.beginPath()
+      ctx.arc(light.x * width, light.y * height, Math.max(3, Math.min(width, height) * 0.012), 0, Math.PI * 2)
+      ctx.fillStyle = '#ffe14a'
+      ctx.fill()
+    }
   }
   if (!waving && image?.url) heldLayout = { url: image.url, width, height, layout: dest }
 }

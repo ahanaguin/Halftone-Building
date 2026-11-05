@@ -150,6 +150,7 @@ export function Studio() {
   const [compositionAck, setCompositionAck] = useState(null)
   const [backgroundAck, setBackgroundAck] = useState(null)
   const [dotsAck, setDotsAck] = useState(null)
+  const [groutAck, setGroutAck] = useState(null)
   const [imageAck, setImageAck] = useState(null)
   const [focusOpen, setFocusOpen] = useState(false)
   const [picker, setPicker] = useState(null)
@@ -945,6 +946,40 @@ export function Studio() {
     })
   }
 
+  function commitGrout(hex, previous, custom) {
+    if (!isHex(hex)) return
+    setGroutAck(null)
+    editStudio((current) => {
+      let backgrounds = [...(current.backgrounds || [])]
+      const choices = backgroundChoicesOf(current, activePalette)
+      const known = choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())
+      if (custom && previous && previous.toLowerCase() !== hex.toLowerCase()) backgrounds = backgrounds.map((item) => (item.toLowerCase() === previous.toLowerCase() ? hex : item))
+      else if (!known && choices.length < MAX_BACKGROUNDS) backgrounds.push(hex)
+      const edits = { ...(current.edits || {}) }
+      if (activeKey) edits[activeKey] = { ...(edits[activeKey] || {}), grout: hex }
+      return { ...current, backgrounds, edits }
+    })
+  }
+
+  function applyGrout() {
+    if (!sections.length) return
+    const hex = isHex(studio.edits?.[activeKey]?.grout) ? studio.edits[activeKey].grout : INK_BLACK
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        if ((previous.grout || '').toLowerCase() === hex.toLowerCase()) continue
+        edits[key] = { ...previous, grout: hex }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setGroutAck(hex.toLowerCase())
+    showToast('Grout applied to all sections.')
+  }
+
   function commitBackground(hex, previous, custom) {
     if (!isHex(hex)) return
     setBackgroundAck(null)
@@ -976,6 +1011,7 @@ export function Studio() {
       })
     }     else if (picker.target === 'palette') onPick(picker.id, picker.hex)
     else if (picker.target === 'dots') commitDots(picker.hex, picker.previous, picker.custom)
+    else if (picker.target === 'grout') commitGrout(picker.hex, picker.previous, picker.custom)
     else commitBackground(picker.hex, picker.previous, picker.custom)
     setPicker(null)
   }
@@ -985,6 +1021,14 @@ export function Studio() {
     const groups = Math.max(1, enabledColors.length)
     const total = Math.min(shapeRange.max, Math.max(shapeRange.min, per * groups))
     writeSection({ count: total })
+  }
+
+  function onTuneFlag(key, value) {
+    editStudio((current) => {
+      const tune = { ...TUNE_DEFAULTS, ...current.tune }
+      if (tune[key] === value) return current
+      return { ...current, tune: { ...tune, [key]: value } }
+    })
   }
 
   function onTune(key, event) {
@@ -1036,6 +1080,8 @@ export function Studio() {
           edit.grain ||
           edit.flow === false ||
           edit.shimmer != null ||
+          isHex(edit.grout) ||
+          edit.ground === 'solid' ||
           (edit.composition && edit.composition !== 'auto')),
     )
     if (!edited) {
@@ -1097,7 +1143,7 @@ export function Studio() {
   useEffect(() => {
     if (!picker) return undefined
     function finish() {
-      const field = picker.target === 'background' ? 'background' : picker.target === 'dots' ? 'dots' : ''
+      const field = picker.target === 'background' ? 'background' : picker.target === 'dots' ? 'dots' : picker.target === 'grout' ? 'grout' : ''
       if (field && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
         const revert = picker.revert
         editStudio((current) => {
@@ -1162,7 +1208,7 @@ export function Studio() {
       ]
   const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
   const sizeValue = sectionEdit.size ?? (mosaicOn ? 32 : imageOn ? DOT_SIZE_DEFAULT : 50)
-  const shimmerValue = sectionEdit.shimmer ?? 50
+  const shimmerValue = sectionEdit.shimmer ?? 62
   const countValue = collageOn
     ? collageCount({ edits: studio.edits, seeds: studio.seeds }, section)
     : imageOn
@@ -1195,6 +1241,15 @@ export function Studio() {
         return hex.toLowerCase() === sectionBackground.toLowerCase()
       }),
   )
+  const sectionGrout = isHex(sectionEdit.grout) ? sectionEdit.grout : INK_BLACK
+  const groutUniform = Boolean(
+    sections.length &&
+      sections.every((item) => {
+        const saved = studio.edits?.[sectionKey(item)]?.grout
+        const hex = isHex(saved) ? saved : INK_BLACK
+        return hex.toLowerCase() === sectionGrout.toLowerCase()
+      }),
+  )
   const dotsUniform = Boolean(
     sections.length &&
       sections.every((item) => {
@@ -1211,9 +1266,11 @@ export function Studio() {
   if (compositionAck != null && !compositionUniform) setCompositionAck(null)
   if (backgroundAck != null && !backgroundUniform) setBackgroundAck(null)
   if (dotsAck != null && !dotsUniform) setDotsAck(null)
+  if (groutAck != null && !groutUniform) setGroutAck(null)
   if (imageAck != null && !imageUniform) setImageAck(null)
   const compositionApplied = compositionAck === composition && compositionUniform
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
+  const groutApplied = groutAck === sectionGrout.toLowerCase() && groutUniform
   const dotsApplied = dotsAck === sectionDots.toLowerCase() && dotsUniform
   const imageApplied = (collageOn ? imageAck === collagePicks.join('|') : imageAck === selectedImage) && imageUniform
   const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
@@ -1883,6 +1940,72 @@ export function Studio() {
             </button>
             {mosaicOn ? (
               <>
+                <p className="side-label">Grout color</p>
+                <div className="swatches background-swatches" role="listbox" aria-label="Grout color">
+                  {backgroundChoices.map((choice) => {
+                    const selected = choice.hex.toLowerCase() === sectionGrout.toLowerCase()
+                    return (
+                      <button
+                        key={`grout-${choice.label}-${choice.hex}`}
+                        type="button"
+                        className={selected ? 'swatch is-on' : 'swatch'}
+                        style={{ background: choice.hex }}
+                        aria-label={choice.label}
+                        aria-selected={selected}
+                        disabled={!section}
+                        onClick={(event) => {
+                          const changed = choice.hex.toLowerCase() !== sectionGrout.toLowerCase()
+                          if (changed) {
+                            setGroutAck(null)
+                            writeSection({ grout: choice.hex })
+                          }
+                          openPicker(event, {
+                            mode: 'edit',
+                            target: 'grout',
+                            hex: choice.hex,
+                            previous: choice.hex,
+                            custom: Boolean(choice.custom),
+                            ...(changed ? { revert: isHex(sectionEdit.grout) ? sectionEdit.grout : null } : {}),
+                          })
+                        }}
+                      />
+                    )
+                  })}
+                  <button
+                    type="button"
+                    className="add-swatch"
+                    aria-label="Add a grout color"
+                    disabled={!section || backgroundChoices.length >= MAX_BACKGROUNDS}
+                    onClick={(event) => openPicker(event, { mode: 'add', target: 'grout', hex: '#1a1a1a' })}
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={groutApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+                  disabled={!section || !sections.length}
+                  onClick={applyGrout}
+                >
+                  {groutApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
+                </button>
+                <p className="side-label">Background tiles</p>
+                <label className="style-field">
+                  <select
+                    className="style-select"
+                    aria-label="Background tiles"
+                    value={sectionEdit.ground === 'solid' ? 'solid' : 'photo'}
+                    disabled={!section}
+                    onChange={(event) => writeSection({ ground: event.target.value === 'solid' ? 'solid' : 'photo' })}
+                  >
+                    <option value="photo">Photo</option>
+                    <option value="solid">Solid color</option>
+                  </select>
+                </label>
+              </>
+            ) : null}
+            {mosaicOn ? (
+              <>
                 <div className="background-row">
                   <p className="side-label">Follow image flow</p>
                   <button
@@ -2215,6 +2338,19 @@ export function Studio() {
       {tuneOpen ? (
         <aside className="debug-panel tune-panel" aria-label="Tuning">
           <p className="tune-title">Tuning</p>
+          <div className="background-row">
+            <p className="side-label">Mosaic lights</p>
+            <button
+              type="button"
+              className="shine-switch"
+              role="switch"
+              aria-checked={tune.mosaicMarks === true}
+              aria-label="Show mosaic lights"
+              onClick={() => onTuneFlag('mosaicMarks', tune.mosaicMarks !== true)}
+            >
+              <span />
+            </button>
+          </div>
           <label>
             <span>
               Blobs per color <strong>{perColor}</strong>

@@ -32,6 +32,7 @@ export const TUNE_DEFAULTS = {
   drift: 1,
   fold: 1,
   spin: 1,
+  mosaicMarks: false,
 }
 
 const MODE_ID = { free: 0, mirror: 1, quad: 2, radial: 3, grid: 4 }
