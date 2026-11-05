@@ -116,6 +116,6 @@ export function paintScaled(canvas, logical, spec) {
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
   ctx.setTransform(canvas.width / logical.width, 0, 0, canvas.height / logical.height, 0, 0)
-  paintFrame(ctx, { ...spec, width: logical.width, height: logical.height })
+  paintFrame(ctx, { ...spec, width: logical.width, height: logical.height, exportPass: true })
   ctx.setTransform(1, 0, 0, 1, 0, 0)
 }
