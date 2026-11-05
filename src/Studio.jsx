@@ -255,8 +255,8 @@ export function Studio() {
     imageIds: (studio.images || []).map((image) => image.id),
     imageSwitch: studio.imageSwitch || 'section',
     focus: studio.focus || {},
-    playing: liveRef.current.playing === true,
-  })
+    playing: !!liveRef.current.playing,
+  }
 
   useEffect(() => {
     if (!track?.file) {
