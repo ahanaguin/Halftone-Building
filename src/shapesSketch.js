@@ -57,6 +57,7 @@ export function mountShapes(node, liveRef, sizeRef) {
         imageIds: live.imageIds,
         imageSwitch: live.imageSwitch,
         focus: live.focus,
+        playing: live.playing === true,
       })
     }
   }

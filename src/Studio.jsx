@@ -219,6 +219,7 @@ export function Studio() {
     imageIds: (studio.images || []).map((image) => image.id),
     imageSwitch: studio.imageSwitch || 'section',
     focus: studio.focus || {},
+    playing: false,
   })
 
   studioRef.current = studio
@@ -254,7 +255,8 @@ export function Studio() {
     imageIds: (studio.images || []).map((image) => image.id),
     imageSwitch: studio.imageSwitch || 'section',
     focus: studio.focus || {},
-  }
+    playing: liveRef.current.playing === true,
+  })
 
   useEffect(() => {
     if (!track?.file) {
@@ -461,6 +463,7 @@ export function Studio() {
         const graph = graphRef.current
         const snapped = metricsAt(profile, audio.currentTime)
         const playingNow = graph && profile && !audio.paused && !audio.ended
+        live.playing = playingNow
         if (snapped && (!playingNow || jumped)) Object.assign(live, snapped)
         if (playingNow && !jumped) {
           const time = new Float32Array(graph.analyser.fftSize)
