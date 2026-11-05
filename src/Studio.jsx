@@ -1208,7 +1208,7 @@ export function Studio() {
       ]
   const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
   const sizeValue = sectionEdit.size ?? (mosaicOn ? 32 : imageOn ? DOT_SIZE_DEFAULT : 50)
-  const shimmerValue = sectionEdit.shimmer ?? 62
+  const shimmerValue = sectionEdit.shimmer ?? 80
   const countValue = collageOn
     ? collageCount({ edits: studio.edits, seeds: studio.seeds }, section)
     : imageOn
@@ -1575,7 +1575,7 @@ export function Studio() {
             {collageOn
               ? 'The frames share the photos you picked, as evenly as they can. The largest frame follows point 1 on the first photo, and the speed slider changes how quickly a smaller frame cuts to another point.'
               : mosaicOn
-                ? 'The photo is rebuilt from small tiles that follow its shapes. A soft light moves across them: bass speeds it up, a beat catches a cluster, and a new photo arrives one tile at a time.'
+                ? 'The photo is rebuilt from small tiles that follow its shapes. A soft light moves across them: bass speeds it up, a beat catches a cluster, and a new photo arrives on a sweep of that light.'
                 : imageOn
                   ? 'The grid is a halftone of the whole photo. Soft zones drift across and sharpen it where they pass. A strong bass hit fuses the darkest dots for a moment, and a beat sends a ripple through the grid.'
                   : explainPoster(poster)}
@@ -1793,7 +1793,7 @@ export function Studio() {
               </button>
             ) : (
               <p className="section-note">
-                {collageOn ? 'Add photos, then choose which ones this section uses. Point 1 on the first chosen photo fills the largest frame.' : mosaicOn ? 'Add a photo. The mosaic follows its shapes, and focus points mark the subject.' : 'Add a photo. Dark areas become larger dots.'}
+                {collageOn ? 'Add photos, then choose which ones this section uses. Point 1 on the first chosen photo fills the largest frame.' : mosaicOn ? 'Add a photo. The mosaic follows its shapes.' : 'Add a photo. Dark areas become larger dots.'}
               </p>
             )}
             {collageOn ? null : (
@@ -2020,9 +2020,6 @@ export function Studio() {
                     <span />
                   </button>
                 </div>
-                <button type="button" className="button-redo apply-all" onClick={() => setFocusOpen(true)}>
-                  Edit focus points
-                </button>
               </>
             ) : null}
             {collageOn ? (

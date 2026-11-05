@@ -25,6 +25,10 @@ function smoothstep(value, edge0, edge1) {
   return t * t * (3 - 2 * t)
 }
 
+function easeInOut(amount) {
+  return smoothstep(amount, 0, 1)
+}
+
 function sectionSeedOf(spec, section, sections) {
   if (!section) return spec.seed || 1
   const key = sectionKey(section)
@@ -43,7 +47,7 @@ function speedOf(spec, section) {
 }
 
 function shimmerOf(spec, section) {
-  const value = editOf(spec, section)?.shimmer ?? 62
+  const value = editOf(spec, section)?.shimmer ?? 80
   return clamp(Number(value) || 0, 0, 100) / 100
 }
 
@@ -629,7 +633,7 @@ function specKey(spec) {
   const bass = spec.profile?.timeline?.bass
   const audio = bass?.length ? `${bass.length}:${Math.round((bass[0] || 0) * 1000)}` : '0'
   const pictures = (spec.images || []).join(',')
-  return `${spec.tempo || 100}|${sections}|${seeds}|${audio}|${pictures}|${spec.imageSwitch || 'section'}|${spec.seed || 1}`
+  return `${spec.tempo || 100}|${sections}|${seeds}|${audio}|${pictures}|${spec.imageSwitch || 'section'}`
 }
 
 function createState(seed) {
@@ -649,6 +653,7 @@ function createState(seed) {
     high: 0.2,
     url: '',
     wave: null,
+    revealHold: false,
   }
 }
 
@@ -669,42 +674,54 @@ function step(state, time, dt, spec) {
   state.bass = state.bass + ((metrics?.bass ?? 0.2) - state.bass) * (1 - Math.exp(-dt / 0.22))
   state.high = state.high + ((metrics?.high ?? 0.2) - state.high) * (1 - Math.exp(-dt / 0.2))
   const kind = labelKind(section?.label || '')
-  const quiet = kind === 'Quiet' || state.loud < 0.28
-  const pace = (0.35 + (speedOf(spec, section) / 100) * 1.25) * (quiet ? 0.24 : 0.48 + state.bass * 1.05) * dt
-  for (const light of state.lights) {
-    light.dir += Math.sin(time * 0.23 + light.wobble) * dt * 0.45
+  const quiet = kind === 'Quiet'
+  const pace = (0.85 + (speedOf(spec, section) / 100) * 2.4) * (quiet ? 0.55 : 1 + state.bass * 0.8) * dt * 0.65
+  state.lights.forEach((light, index) => {
+    if (index === 0 && state.revealHold) return
+    light.dir += Math.sin(time * 0.23 + light.wobble) * dt * 0.29
     light.x += Math.cos(light.dir) * pace * 0.62
     light.y += Math.sin(light.dir) * pace * 0.62
     if (light.x < 0.03 || light.x > 0.97) light.dir = Math.PI - light.dir
     if (light.y < 0.03 || light.y > 0.97) light.dir = -light.dir
     light.x = clamp(light.x, 0.03, 0.97)
     light.y = clamp(light.y, 0.03, 0.97)
-  }
+  })
   const hits = biggestDropTimes(spec)
   const drop = hits.some((hit) => hit > time - dt - 0.02 && hit <= time + 0.001) || (kind === 'Drop' && time - dt < (section?.start || 0) && time >= (section?.start || 0))
-  if (drop) {
+  if (drop && !state.revealHold) {
     state.sweepStart = time
     state.sweepY = 0.28 + ((state.lights[0].y + state.lights[1].y) % 1) * 0.44
   }
   const sweepAge = time - state.sweepStart
-  if (sweepAge >= 0 && sweepAge < 0.4) {
-    state.lights[0].x = -0.08 + (sweepAge / 0.4) * 1.16
+  if (!state.revealHold && sweepAge >= 0 && sweepAge < 0.62) {
+    const along = easeInOut(sweepAge / 0.62)
+    state.lights[0].x = -0.08 + along * 1.16
     state.lights[0].y = state.sweepY
   }
-  if (!quiet && strongBeat(metrics, previous) && time - state.catchTime > 0.28) {
+  if (!quiet && strongBeat(metrics, previous) && time - state.catchTime > 0.48) {
     state.catchTime = time
     state.catchX = state.lights[0].x
     state.catchY = state.lights[0].y
   }
 }
 
+function catchEnvelope(age) {
+  const duration = 0.48
+  const t = clamp(age / duration, 0, 1)
+  if (t <= 0) return 0
+  if (t >= 1) return 0
+  if (t < 0.28) return easeInOut(t / 0.28)
+  return 1 - easeInOut((t - 0.28) / 0.72)
+}
+
 function simulate(spec, time) {
   const key = specKey(spec)
   const target = Math.max(0, time || 0)
   if (!simCache || simCache.key !== key || target + 1e-4 < simCache.time) {
+    const rewound = Boolean(simCache && target + 1e-4 < simCache.time)
     const first = (spec.sections || [])[0]
     simCache = { key, time: 0, state: createState(sectionSeedOf(spec, first, spec.sections || [])) }
-    heldLayout = null
+    if (rewound) heldLayout = null
   }
   let guard = 0
   while (simCache.time < target - 1e-4 && guard < 20000) {
@@ -716,16 +733,86 @@ function simulate(spec, time) {
   return simCache.state
 }
 
+function barLength(spec) {
+  return (60 / Math.max(40, spec.tempo || 100)) * 4
+}
+
+function revealPlan(spec, time, previousUrl) {
+  if (!previousUrl) return null
+  const sections = [...(spec.sections || [])].sort((a, b) => a.start - b.start)
+  const duration = barLength(spec) * 1.75
+  const lead = duration * 0.62
+  for (let index = 1; index < sections.length; index += 1) {
+    const section = sections[index]
+    const windowStart = section.start - lead
+    if (time < windowStart || time > windowStart + duration) continue
+    const nextUrl = activeImage(spec, section)?.url || ''
+    const fromUrl = activeImage(spec, sections[index - 1])?.url || ''
+    if (!nextUrl || nextUrl === fromUrl) continue
+    if (fromUrl !== previousUrl && nextUrl !== previousUrl) continue
+    const seed = sectionSeedOf(spec, section, sections)
+    return {
+      from: fromUrl,
+      to: nextUrl,
+      start: windowStart,
+      duration,
+      curve: (seed % 1000) / 1000 * Math.PI * 2,
+      noise: (seed % 997) + 3,
+    }
+  }
+  return null
+}
+
 function syncWave(state, spec, time) {
   const section = sectionAt(spec.sections || [], time) || (spec.sections || [])[0]
   const image = activeImage(spec, section)
   const url = image?.url || ''
-  if (state.url && url && state.url !== url) {
-    const duration = 0.85 + (1 - speedOf(spec, section) / 100) * 0.95
-    state.wave = { from: state.url, to: url, start: time, duration }
+  if (state.wave && time > state.wave.start + state.wave.duration) state.wave = null
+  if (!state.wave) {
+    const plan = revealPlan(spec, time, state.url)
+    if (plan) state.wave = plan
   }
   if (url) state.url = url
   return image
+}
+
+function canvasFocus(spec, image, width, height) {
+  const points = focusPoints(spec, image)
+  const point = points[0] || { x: 0.5, y: 0.42 }
+  const photo = image?.url ? photos.get(image.url) : null
+  if (!photo) return { x: clamp(point.x, 0.08, 0.92), y: clamp(point.y, 0.08, 0.92) }
+  const crop = coverRect(photo, width / Math.max(1, height))
+  return {
+    x: clamp((point.x * photo.width - crop.x) / Math.max(1, crop.width), 0.08, 0.92),
+    y: clamp((point.y * photo.height - crop.y) / Math.max(1, crop.height), 0.08, 0.92),
+  }
+}
+
+function warpedDistance(nx, ny, origin, curve) {
+  const dx = nx - origin.x
+  const dy = ny - origin.y
+  const angle = Math.atan2(dy, dx)
+  const curveScale = 1 + Math.sin(angle * 2 + curve) * 0.18 + Math.sin(angle * 5 - curve * 1.6) * 0.09
+  return Math.hypot(dx, dy) * curveScale
+}
+
+function reachOf(origin, curve) {
+  let max = 0.2
+  for (const [x, y] of [[0, 0], [1, 0], [0, 1], [1, 1], [0.5, 0], [0.5, 1], [0, 0.5], [1, 0.5]]) {
+    max = Math.max(max, warpedDistance(x, y, origin, curve) + 0.07)
+  }
+  return max
+}
+
+function revealMix(tile, index, origin, wave, time, width, height) {
+  const nx = tile.x / Math.max(1, width)
+  const ny = tile.y / Math.max(1, height)
+  const warped = warpedDistance(nx, ny, origin, wave.curve) + (hashUnit(index, wave.noise) - 0.5) * 0.1
+  const sweepSeconds = Math.max(0.4, wave.duration * 0.82)
+  const travel = easeInOut(clamp((time - wave.start) / sweepSeconds, 0, 1))
+  const reach = reachOf(origin, wave.curve)
+  const fade = (0.4 / sweepSeconds) * reach
+  return smoothstep(travel * reach - warped, 0, fade)
 }
 
 function backgroundRgb(spec) {
@@ -744,15 +831,10 @@ function tileRgb(tile, bg, solid) {
 }
 
 function faceAmount(tile, lights, width, height) {
-  const nx = tile.x / width
-  const ny = tile.y / height
-  let sum = 0
-  lights.forEach((light, index) => {
-    const angle = Math.atan2(light.y - ny, light.x - nx)
-    const weight = index === 0 ? 0.72 : 0.28
-    sum += Math.cos(tile.tilt - angle) * weight
-  })
-  return clamp(sum, -1, 1)
+  const light = lights[0]
+  if (!light) return 0
+  const angle = Math.atan2(light.y - tile.y / height, light.x - tile.x / width)
+  return Math.cos(tile.tilt - angle)
 }
 
 function hashUnit(index, bucket) {
@@ -778,8 +860,13 @@ function mixRgb(from, to, amount) {
   ]
 }
 
-function waveAmount(order, progress) {
-  return smoothstep(progress * 1.08 - order, 0, 0.07)
+function incomingColor(field, tile, width, height, solid, bg) {
+  if (!field) return null
+  const nx = clamp(tile.x / width, 0, 1)
+  const ny = clamp(tile.y / height, 0, 1)
+  const sample = fieldAt(field, nx, ny)
+  if (solid && sample.subject < 0.34) return varyColor(bg, tile.jitter || 1)
+  return varyColor(sampleColor(field, nx, ny, tile.size, width), tile.jitter || 1)
 }
 
 export function paintMosaic(ctx, spec) {
@@ -797,55 +884,66 @@ export function paintMosaic(ctx, spec) {
 
   const dest = layoutFor(spec, section, image, width, height)
   const wave = state.wave
-  const waving = Boolean(wave && image?.url === wave.to && time < wave.start + wave.duration + 0.04)
+  const waving = Boolean(wave && time >= wave.start && time <= wave.start + wave.duration)
   const fromLayout = waving && heldLayout?.url === wave.from && heldLayout.width === width && heldLayout.height === height
     ? heldLayout.layout
     : waving
       ? layoutFor(spec, section, pairFor(spec, wave.from), width, height)
       : dest
-  const progress = waving ? clamp((time - wave.start) / wave.duration, 0, 1) : 1
+  const tiles = waving && fromLayout?.tiles?.length ? fromLayout.tiles : dest.tiles
+  const toImage = waving ? pairFor(spec, wave.to) : null
+  const toField = toImage?.url ? fieldFor(toImage, width / height, focusPoints(spec, toImage)) : null
+  const origin = waving ? canvasFocus(spec, toImage, width, height) : null
+  if (waving && origin) {
+    const sweepSeconds = Math.max(0.4, wave.duration * 0.82)
+    const travel = easeInOut(clamp((time - wave.start) / sweepSeconds, 0, 1))
+    const ang = wave.curve + travel * 2.6 + Math.sin(travel * Math.PI) * 1.05
+    const rad = 0.06 + travel * 0.78
+    state.lights[0].x = clamp(origin.x + Math.cos(ang) * rad, 0.03, 0.97)
+    state.lights[0].y = clamp(origin.y + Math.sin(ang) * rad, 0.03, 0.97)
+  }
+  state.revealHold = waving
   const kind = labelKind(section?.label || '')
-  const quiet = kind === 'Quiet' || state.loud < 0.28
+  const quiet = kind === 'Quiet'
   const shimmer = shimmerOf(spec, section)
-  const sweeping = time - state.sweepStart >= 0 && time - state.sweepStart < 0.4
-  const amp = Math.min(0.25, (0.06 + shimmer * 0.19) * (quiet ? 0.6 : 1) + (sweeping ? 0.03 : state.bass * 0.03))
+  const sweeping = time - state.sweepStart >= 0 && time - state.sweepStart < 0.62
+  const amp = Math.min(0.46, (0.14 + shimmer * 0.32) * (quiet ? 0.82 : 1) + (sweeping ? 0.04 : 0))
   const catchAge = time - state.catchTime
-  const catchOn = !quiet && catchAge >= 0 && catchAge < 0.3
-  const catchEnv = catchOn ? Math.sin((catchAge / 0.3) * Math.PI) : 0
+  const catchOn = !quiet && catchAge >= 0 && catchAge < 0.48
+  const catchEnv = catchOn ? catchEnvelope(catchAge) : 0
   const twinkleGate = quiet ? 0 : smoothstep(state.high, 0.42, 0.86) * shimmer
   const bucket = Math.floor(time * 4)
   const reach = Math.max(0.08, (dest.pitch || 16) / Math.min(width, height) * 2.4)
 
-  const count = dest.tiles.length
-  const fromCount = fromLayout.tiles.length
-  for (let index = 0; index < count; index += 1) {
-    const tile = dest.tiles[index]
-    const from = fromCount ? fromLayout.tiles[Math.round((index / Math.max(1, count - 1)) * (fromCount - 1))] : tile
-    const mix = waveAmount(tile.order, progress)
-    const x = from.x + (tile.x - from.x) * mix
-    const y = from.y + (tile.y - from.y) * mix
-    const rot = from.rot + (tile.rot - from.rot) * mix
-    const size = (from.size + (tile.size - from.size) * mix) * (1 - 0.06 * Math.sin(mix * Math.PI))
-    const color = mixRgb(tileRgb(from, bg, solid), tileRgb(tile, bg, solid), mix)
+  for (let index = 0; index < tiles.length; index += 1) {
+    const tile = tiles[index]
+    const x = tile.x
+    const y = tile.y
+    const mix = waving && toField ? revealMix(tile, index, origin, wave, time, width, height) : 1
+    const oldColor = tileRgb(tile, bg, solid)
+    const nextColor = mix > 0 && mix < 1 ? incomingColor(toField, tile, width, height, solid, bg) : null
+    const color = nextColor ? mixRgb(oldColor, nextColor, mix) : mix >= 1 && toField ? incomingColor(toField, tile, width, height, solid, bg) || oldColor : oldColor
+    const env = waving ? Math.sin(clamp(mix, 0, 1) * Math.PI) : 0
+    const rot = tile.rot + (hashUnit(index, wave?.noise || 1) - 0.5) * 2 * ((15 * Math.PI) / 180) * env
     const face = faceAmount({ ...tile, x, y }, state.lights, width, height)
     let response = face * amp
     if (catchOn) {
       const dx = x / width - state.catchX
       const dy = y / height - state.catchY
       const near = Math.exp(-(dx * dx + dy * dy) / (reach * reach))
-      response += near * catchEnv * shimmer * 0.08
+      response += near * catchEnv * shimmer * 0.055
     }
     if (twinkleGate > 0 && hashUnit(index, bucket) < twinkleGate * 0.012) {
       response += (0.5 + 0.5 * Math.sin(time * 16 + index)) * twinkleGate * 0.08
     }
-    response = clamp(response, -0.25, 0.25)
+    response = clamp(response, -0.46, 0.46)
     const warm = Math.max(0, face) * Math.min(0.45, shimmer * 0.4)
-    const rgb = shade(color, response, warm)
+    const boosted = shade(color, response, warm).map((channel) => clamp(channel * (1 + 0.15 * env), 0, 250))
     ctx.save()
     ctx.translate(x, y)
     ctx.rotate(rot)
-    ctx.fillStyle = `rgb(${rgb[0] | 0}, ${rgb[1] | 0}, ${rgb[2] | 0})`
-    ctx.fillRect(-size / 2, -size / 2, size, size)
+    ctx.fillStyle = `rgb(${boosted[0] | 0}, ${boosted[1] | 0}, ${boosted[2] | 0})`
+    ctx.fillRect(-tile.size / 2, -tile.size / 2, tile.size, tile.size)
     ctx.restore()
   }
   if (spec.tune?.mosaicMarks) {
