@@ -17,6 +17,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.0",
+    "three": "^0.187.0",
     "web-audio-beat-detector": "^8.2.39"
   },
   "devDependencies": {

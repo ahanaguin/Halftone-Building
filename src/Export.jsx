@@ -29,6 +29,7 @@ const STYLE_LABELS = {
   poster: 'Poster',
   image: 'Image animation',
   bloom: 'Bloom',
+  orb: 'Orb',
 }
 
 function Check({ checked, onChange, label, disabled }) {

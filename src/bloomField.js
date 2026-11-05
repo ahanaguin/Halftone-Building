@@ -73,9 +73,17 @@ function visibleInk(hex, background) {
   const [h, s, l] = rgbToHsl(r, g, b)
   const [, , bl] = rgbToHsl(br, bg, bb)
   const dist = Math.hypot(r - br, g - bg, b - bb) / 441.67
-  if (dist >= 0.22 && Math.abs(l - bl) >= 0.18) return ink
-  const target = bl > 0.55 ? Math.min(l, 0.32) : Math.max(l, 0.78)
-  if (Math.abs(target - bl) < 0.18) return hslToHex(h, Math.max(s, 0.04), bl > 0.5 ? 0.16 : 0.9)
+  const gap = 0.2
+  if (dist >= gap && Math.abs(l - bl) >= gap) return ink
+  let target
+  if (l >= bl) {
+    target = Math.min(0.94, Math.max(l, bl + gap))
+    if (target - bl < gap) target = Math.max(0.08, bl - gap)
+  } else {
+    target = Math.max(0.08, Math.min(l, bl - gap))
+    if (bl - target < gap) target = Math.min(0.94, bl + gap)
+  }
+  if (Math.abs(target - l) < 0.002) return ink
   return hslToHex(h, s, target)
 }
 
@@ -175,6 +183,30 @@ function morphAlong(u, filled, starBias) {
   return { mode, scale: 1 + Math.sin(u * Math.PI) * 0.22 }
 }
 
+function easeOut(amount) {
+  const t = clamp(amount, 0, 1)
+  return 1 - (1 - t) * (1 - t)
+}
+
+function pulseFor(n, count, seed, time, period, quiet) {
+  const place = count <= 1 ? 1 : n / (count - 1)
+  if (place < 0.16) return 0
+  const chance = quiet ? 0.055 : 0.1
+  if (hashUnit(n, seed ^ 0x91) >= chance) return 0
+  const delay = hashUnit(n, seed ^ 0x22) * period * 0.16
+  const every = hashUnit(n, seed ^ 0x33) < 0.42 ? 1 : hashUnit(n, seed ^ 0x44) < 0.55 ? 2 : 4
+  const local = time - delay
+  if (local < 0) return 0
+  const beat = Math.floor(local / period)
+  if (beat < 0 || beat % every !== 0) return 0
+  const p = (local / period) % 1
+  const attack = 0.1
+  const release = quiet ? 0.48 : 0.36
+  if (p <= attack) return easeOut(p / attack)
+  if (p >= attack + release) return 0
+  return 1 - easeInOut((p - attack) / release)
+}
+
 function colorFor(n, count, colors, mode, armCount) {
   if (colors.length <= 1 || mode === 'single') return colors[0]
   if (mode === 'rings') {
@@ -231,6 +263,8 @@ export function layoutBloom(spec) {
   const mode = colorModeOf(edit)
   const armCount = FIB.find((step) => step >= 13 && step < count / 4) || 21
   const metrics = sampleAt(spec, time)
+  const quiet = kind === 'Quiet' || kind === 'Intro' || kind === 'Break' || kind === 'Outro'
+  const period = 60 / tempo
   const waves = wavesAt(spec, time, count, seed, tempo, kind, metrics.loud ?? 0.35)
   const starBias = clamp(((metrics.high ?? 0.25) - 0.28) * 1.5, 0, 1)
   const shiftAmt = 0.08 + clamp(metrics.bass ?? 0.4, 0, 1) * 0.28
@@ -268,6 +302,11 @@ export function layoutBloom(spec) {
         }
       }
     }
+    const pulse = pulseFor(n, count, seed, time, period, quiet)
+    if (pulse > 0 && best < 0.28) {
+      scale = Math.max(scale, 1 + pulse * 0.46)
+      if (!filled && pulse > 0.42 && hashUnit(n, seed ^ 0x55) < 0.38) modeNow = 'fill'
+    }
     dots.push({
       x,
       y,
@@ -275,7 +314,7 @@ export function layoutBloom(spec) {
       mode: modeNow,
       color: colorFor(n, count, colors, mode, armCount),
       spin: theta,
-      stroke,
+      stroke: stroke * (1 + (best < 0.28 ? pulse * 0.4 : 0)),
     })
   }
   return { dots, background, shortSide }
