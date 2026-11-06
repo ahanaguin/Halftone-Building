@@ -3,6 +3,7 @@ import { frameMode, paintMetaballs, TUNE_DEFAULTS } from './metaballs.js'
 import { imageComposition, paintCollage } from './collageField.js'
 import { paintHalftone } from './halftoneField.js'
 import { paintMosaic } from './mosaicField.js'
+import { paintRiso } from './risoField.js'
 import { paintBloom } from './bloomField.js'
 import { paintOrb } from './orbField.js'
 import { paintChrome } from './chromeField.js'
@@ -64,6 +65,7 @@ export function paintFrame(ctx, spec) {
     const composition = imageComposition(spec)
     if (composition === 'collage') paintCollage(ctx, spec)
     else if (composition === 'mosaic') paintMosaic(ctx, spec)
+    else if (composition === 'riso') paintRiso(ctx, spec)
     else paintHalftone(ctx, spec)
   }
   else if (frameMode(spec) === 'grid') paintGrid(ctx, spec)

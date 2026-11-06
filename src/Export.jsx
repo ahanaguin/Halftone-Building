@@ -4,6 +4,7 @@ import { frameInput, paintFrame } from './drawFrame.js'
 import { prepareCollage } from './collageField.js'
 import { prepareHalftone } from './halftoneField.js'
 import { prepareMosaic } from './mosaicField.js'
+import { prepareRiso } from './risoField.js'
 import {
   FILM_FPS,
   LOGICAL,
@@ -54,7 +55,7 @@ function Artwork({ aspect, spec }) {
     const canvas = ref.current
     if (!canvas || !spec) return undefined
     let cancel = false
-    Promise.all([prepareHalftone(spec), prepareCollage(spec), prepareMosaic(spec)]).then(() => {
+    Promise.all([prepareHalftone(spec), prepareCollage(spec), prepareMosaic(spec), prepareRiso(spec)]).then(() => {
       if (cancel || ref.current !== canvas) return
       canvas.width = logical.width
       canvas.height = logical.height

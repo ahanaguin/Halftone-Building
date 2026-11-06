@@ -6,6 +6,7 @@ import { frameInput, paintScaled } from './drawFrame.js'
 import { prepareCollage } from './collageField.js'
 import { prepareHalftone } from './halftoneField.js'
 import { prepareMosaic } from './mosaicField.js'
+import { prepareRiso } from './risoField.js'
 import { FILM_FPS, LOGICAL, LOOP_FPS, OUTPUT, filmFrames, loopFrames } from './exportPlan.js'
 
 export class ExportCancelled extends Error {
@@ -165,6 +166,7 @@ export async function renderCover({ track, studio, profile, time, signal }) {
     prepareHalftone({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['1:1'].width, height: LOGICAL['1:1'].height }),
     prepareCollage({ style: studio.style, images: (studio.images || []).map((image) => image.url) }),
     prepareMosaic({ style: studio.style, images: (studio.images || []).map((image) => image.url) }),
+    prepareRiso({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['1:1'].width, height: LOGICAL['1:1'].height }),
   ])
   const canvas = document.createElement('canvas')
   canvas.width = OUTPUT.cover.width
@@ -178,6 +180,7 @@ export async function renderLoop({ track, studio, profile, start, length, signal
     prepareHalftone({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['9:16'].width, height: LOGICAL['9:16'].height }),
     prepareCollage({ style: studio.style, images: (studio.images || []).map((image) => image.url) }),
     prepareMosaic({ style: studio.style, images: (studio.images || []).map((image) => image.url) }),
+    prepareRiso({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['9:16'].width, height: LOGICAL['9:16'].height }),
   ])
   const frames = loopFrames(start, length, LOOP_FPS)
   return encodeFrames({
@@ -197,6 +200,7 @@ export async function renderFilm({ track, studio, profile, signal, onFrame }) {
     prepareHalftone({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['16:9'].width, height: LOGICAL['16:9'].height }),
     prepareCollage({ style: studio.style, images: (studio.images || []).map((image) => image.url) }),
     prepareMosaic({ style: studio.style, images: (studio.images || []).map((image) => image.url) }),
+    prepareRiso({ style: studio.style, images: (studio.images || []).map((image) => image.url), width: LOGICAL['16:9'].width, height: LOGICAL['16:9'].height }),
   ])
   return encodeFrames({
     frames: filmFrames(track.duration, FILM_FPS),

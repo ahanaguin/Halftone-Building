@@ -34,6 +34,16 @@ import { DOT_DENSITY, DOT_SIZE_DEFAULT } from './halftoneField.js'
 import { BLOOM_COUNT, COLOR_MODES, DEFAULT_DOT_COLOR, MAX_DOT_COLORS, bloomDotColorsOf, colorModeOf, explainBloom } from './bloomField.js'
 import { DEFAULT_ORB_COLORS, ORB_COUNT, explainOrb, orbDotColorsOf } from './orbField.js'
 import { CHROME_COUNT, CHROME_GREY, CHROME_METALS, CHROME_SILVER, MAX_METALS, explainChrome } from './chromeField.js'
+import {
+  GRAIN_SIZE,
+  MAX_INKS,
+  MISREG_DEFAULT,
+  RISO_INKS,
+  RISO_PAPER,
+  explainRiso,
+  prepareRiso,
+  risoInksOf,
+} from './risoField.js'
 import { INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pickRecipe, sectionAt, sectionKey, sectionSeed } from './shapeLayout.js'
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
@@ -69,6 +79,29 @@ function backgroundChoicesOf(studio, paletteSource) {
   return choices
 }
 
+function inkChoicesOf(studio, paletteSource) {
+  const extras = []
+  for (const hex of studio.inks || []) {
+    if (!isHex(hex)) continue
+    if (extras.some((item) => item.toLowerCase() === hex.toLowerCase())) continue
+    extras.push(hex)
+  }
+  const source = paletteSource?.swatches || studio.palette?.swatches || []
+  const palette = source.map((swatch) => swatchHex(swatch))
+  const room = Math.max(0, MAX_INKS - RISO_INKS.length - extras.length)
+  const choices = RISO_INKS.map((item) => ({ ...item }))
+  palette.slice(0, room).forEach((hex, index) => {
+    if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
+    choices.push({ hex, label: `Color ${index + 1}` })
+  })
+  extras.forEach((hex) => {
+    if (choices.length >= MAX_INKS) return
+    if (choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())) return
+    choices.push({ hex, label: 'Custom color', custom: true })
+  })
+  return choices
+}
+
 function metalChoicesOf(studio, paletteSource) {
   const extras = []
   for (const hex of studio.metals || []) {
@@ -96,7 +129,7 @@ const STYLES = [
   { id: 'shapes', label: 'Liquid', ready: true },
   { id: 'bloom', label: 'Bloom', ready: true },
   { id: 'orb', label: 'Orb', ready: true },
-  { id: 'chrome', label: 'Chrome', ready: true },
+  { id: 'chrome', label: 'Chrome', ready: false },
   { id: 'halftone', label: 'Halftone', ready: false },
   { id: 'bars', label: 'Bars', ready: false },
   { id: 'wave', label: 'Wave', ready: false },
@@ -187,6 +220,7 @@ export function Studio() {
   const [dotColorAck, setDotColorAck] = useState(null)
   const [backgroundAck, setBackgroundAck] = useState(null)
   const [metalAck, setMetalAck] = useState(null)
+  const [inksAck, setInksAck] = useState(null)
   const [dotsAck, setDotsAck] = useState(null)
   const [groutAck, setGroutAck] = useState(null)
   const [imageAck, setImageAck] = useState(null)
@@ -218,6 +252,7 @@ export function Studio() {
   const splitRef = useRef(null)
   const resizeDrag = useRef(null)
   const renameCommit = useRef(false)
+  const lastInkSlot = useRef(1)
   const sizeRef = useRef(size)
   const liveRef = useRef({
     loud: 0.35,
@@ -825,6 +860,7 @@ export function Studio() {
     if (studio.style === 'image') {
       if (edit?.composition === 'collage') return 'collage'
       if (edit?.composition === 'mosaic') return 'mosaic'
+      if (edit?.composition === 'riso') return 'riso'
       return 'halftone'
     }
     if (studio.style === 'bloom') return edit?.composition === 'ring' ? 'ring' : 'full'
@@ -847,7 +883,7 @@ export function Studio() {
       }
       return changed ? { ...current, edits } : current
     })
-    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', halftone: 'Halftone', collage: 'Collage', mosaic: 'Mosaic', full: 'Full', ring: 'Ring', sphere: 'Sphere' }[mode]
+    const name = { auto: 'Auto', free: 'Free', mirror: 'Mirror', quad: 'Quad', radial: 'Radial', halftone: 'Halftone', collage: 'Collage', mosaic: 'Mosaic', riso: 'Riso', full: 'Full', ring: 'Ring', sphere: 'Sphere' }[mode]
     setCompositionAck(mode)
     showToast(`${name} applied to all sections.`)
   }
@@ -915,6 +951,10 @@ export function Studio() {
           ? isHex(studio.background) && studio.background.toLowerCase() !== PAPER.toLowerCase()
             ? studio.background
             : CHROME_GREY
+          : studio.style === 'image' && studio.edits?.[activeKey]?.composition === 'riso'
+            ? isHex(studio.background) && studio.background.toLowerCase() !== PAPER.toLowerCase()
+              ? studio.background
+              : RISO_PAPER
           : studio.background || PAPER
     editStudio((current) => {
       const edits = { ...(current.edits || {}) }
@@ -963,6 +1003,46 @@ export function Studio() {
       const edits = { ...(current.edits || {}) }
       if (activeKey) edits[activeKey] = { ...(edits[activeKey] || {}), metal: hex }
       return { ...current, metals, edits }
+    })
+  }
+
+  function applyInks() {
+    if (!sections.length) return
+    const inks = risoInksOf(studio.edits?.[activeKey])
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        const saved = risoInksOf(previous)
+        if (saved.length === inks.length && saved.every((hex, index) => hex.toLowerCase() === inks[index].toLowerCase())) continue
+        edits[key] = { ...previous, inks }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setInksAck(inks.map((hex) => hex.toLowerCase()).join('|'))
+    showToast('Ink colors applied to all sections.')
+  }
+
+  function commitInks(hex, previous, custom, slot) {
+    if (!isHex(hex)) return
+    const index = slot === 0 || slot === 1 ? slot : lastInkSlot.current
+    lastInkSlot.current = index
+    const current = risoInksOf(studio.edits?.[activeKey])
+    const next = current.slice()
+    next[index] = hex
+    setInksAck(null)
+    editStudio((currentStudio) => {
+      let extras = [...(currentStudio.inks || [])]
+      const choices = inkChoicesOf(currentStudio, activePalette)
+      const known = choices.some((item) => item.hex.toLowerCase() === hex.toLowerCase())
+      if (custom && previous && previous.toLowerCase() !== hex.toLowerCase()) extras = extras.map((item) => (item.toLowerCase() === previous.toLowerCase() ? hex : item))
+      else if (!known && choices.length < MAX_INKS) extras.push(hex)
+      const edits = { ...(currentStudio.edits || {}) }
+      if (activeKey) edits[activeKey] = { ...(edits[activeKey] || {}), inks: next }
+      return { ...currentStudio, inks: extras, edits }
     })
   }
 
@@ -1214,6 +1294,7 @@ export function Studio() {
     else if (picker.target === 'dots') commitDots(picker.hex, picker.previous, picker.custom)
     else if (picker.target === 'grout') commitGrout(picker.hex, picker.previous, picker.custom)
     else if (picker.target === 'metal') commitMetal(picker.hex, picker.previous, picker.custom)
+    else if (picker.target === 'ink') commitInks(picker.hex, picker.previous, picker.custom, picker.slot)
     else commitBackground(picker.hex, picker.previous, picker.custom)
     setPicker(null)
   }
@@ -1273,6 +1354,7 @@ export function Studio() {
           isHex(edit.metal) ||
           edit.tint != null ||
           isHex(edit.dots) ||
+          edit.inks?.length >= 2 ||
           edit.image ||
           edit.images?.length ||
           edit.contrast != null ||
@@ -1353,7 +1435,18 @@ export function Studio() {
     if (!picker) return undefined
     function finish() {
       const field = picker.target === 'background' ? 'background' : picker.target === 'dots' ? 'dots' : picker.target === 'grout' ? 'grout' : picker.target === 'metal' ? 'metal' : ''
-      if (picker.target === 'dotColor' && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
+      if (picker.target === 'ink' && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
+        const revert = picker.revert
+        editStudio((current) => {
+          const edits = { ...(current.edits || {}) }
+          const previous = { ...(edits[activeKey] || {}) }
+          if (Array.isArray(revert) && revert.length >= 2) previous.inks = revert
+          else delete previous.inks
+          if (Object.keys(previous).length) edits[activeKey] = previous
+          else delete edits[activeKey]
+          return { ...current, edits }
+        })
+      } else if (picker.target === 'dotColor' && activeKey && Object.prototype.hasOwnProperty.call(picker, 'revert')) {
         const revert = picker.revert
         editStudio((current) => {
           const edits = { ...(current.edits || {}) }
@@ -1411,7 +1504,9 @@ export function Studio() {
       ? 'collage'
       : sectionEdit.composition === 'mosaic'
         ? 'mosaic'
-        : 'halftone'
+        : sectionEdit.composition === 'riso'
+          ? 'riso'
+          : 'halftone'
     : bloomOn
       ? sectionEdit.composition === 'ring'
         ? 'ring'
@@ -1425,11 +1520,13 @@ export function Studio() {
           : 'auto'
   const collageOn = imageOn && composition === 'collage'
   const mosaicOn = imageOn && composition === 'mosaic'
+  const risoOn = imageOn && composition === 'riso'
   const compositionOptions = imageOn
     ? [
         { id: 'halftone', label: 'Halftone' },
         { id: 'collage', label: 'Collage' },
         { id: 'mosaic', label: 'Mosaic' },
+        { id: 'riso', label: 'Riso' },
       ]
     : bloomOn
       ? [
@@ -1449,7 +1546,7 @@ export function Studio() {
           { id: 'radial', label: 'Radial' },
         ]
   const shapeRange = SHAPE_RANGE[poster] || SHAPE_RANGE.eclipse
-  const sizeValue = sectionEdit.size ?? (mosaicOn ? 32 : imageOn ? DOT_SIZE_DEFAULT : 50)
+  const sizeValue = sectionEdit.size ?? (mosaicOn ? 32 : risoOn ? MISREG_DEFAULT : imageOn ? DOT_SIZE_DEFAULT : 50)
   const tintValue = Math.min(100, Math.max(0, Math.round(sectionEdit.tint ?? 40)))
   const shimmerValue = sectionEdit.shimmer ?? 80
   const countValue = collageOn
@@ -1460,6 +1557,8 @@ export function Studio() {
         ? Math.min(ORB_COUNT.max, Math.max(ORB_COUNT.min, Math.round(sectionEdit.count ?? ORB_COUNT.count)))
         : chromeOn
         ? Math.min(CHROME_COUNT.max, Math.max(CHROME_COUNT.min, Math.round(sectionEdit.count ?? CHROME_COUNT.count)))
+        : risoOn
+        ? Math.min(GRAIN_SIZE.max, Math.max(GRAIN_SIZE.min, Math.round(sectionEdit.count ?? GRAIN_SIZE.count)))
         : imageOn
         ? Math.min(DOT_DENSITY.max, Math.max(DOT_DENSITY.min, sectionEdit.count ?? DOT_DENSITY.count))
         : Math.min(shapeRange.max, Math.max(shapeRange.min, sectionEdit.count ?? shapeRange.count))
@@ -1483,6 +1582,10 @@ export function Studio() {
         ? isHex(studio.background) && studio.background.toLowerCase() !== PAPER.toLowerCase()
           ? studio.background
           : CHROME_GREY
+        : risoOn
+          ? isHex(studio.background) && studio.background.toLowerCase() !== PAPER.toLowerCase()
+            ? studio.background
+            : RISO_PAPER
         : studio.background || PAPER
   const sectionDots = isHex(sectionEdit.dots) ? sectionEdit.dots : INK_BLACK
   const contrastValue = sectionEdit.contrast ?? 50
@@ -1551,6 +1654,16 @@ export function Studio() {
   if (dotColorAck != null && !bloomColorUniform) setDotColorAck(null)
   if (backgroundAck != null && !backgroundUniform) setBackgroundAck(null)
   if (metalAck != null && !metalUniform) setMetalAck(null)
+  const sectionInks = risoInksOf(sectionEdit)
+  const inksKey = sectionInks.map((hex) => hex.toLowerCase()).join('|')
+  const inksUniform = Boolean(
+    sections.length &&
+      sections.every((item) => {
+        const saved = risoInksOf(studio.edits?.[sectionKey(item)])
+        return saved.length === sectionInks.length && saved.every((hex, index) => hex.toLowerCase() === sectionInks[index].toLowerCase())
+      }),
+  )
+  if (inksAck != null && !inksUniform) setInksAck(null)
   if (dotsAck != null && !dotsUniform) setDotsAck(null)
   if (groutAck != null && !groutUniform) setGroutAck(null)
   if (imageAck != null && !imageUniform) setImageAck(null)
@@ -1560,11 +1673,16 @@ export function Studio() {
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
   const metalApplied = metalAck === sectionMetal.toLowerCase() && metalUniform
   const metalChoices = metalChoicesOf(studio, activePalette)
+  const inksApplied = inksAck === inksKey && inksUniform
+  const inkChoices = inkChoicesOf(studio, activePalette)
   const groutApplied = groutAck === sectionGrout.toLowerCase() && groutUniform
   const dotsApplied = dotsAck === sectionDots.toLowerCase() && dotsUniform
   const imageApplied = (collageOn ? imageAck === collagePicks.join('|') : imageAck === selectedImage) && imageUniform
   const arrangementOn = arrangementAck?.key === activeKey && arrangementAck.seed === studio.seeds[activeKey]
   const backgroundChoices = backgroundChoicesOf(studio, activePalette)
+  if (risoOn && !backgroundChoices.some((choice) => choice.hex.toLowerCase() === RISO_PAPER.toLowerCase())) {
+    backgroundChoices.splice(1, 0, { hex: RISO_PAPER, label: 'Warm paper' })
+  }
   const sectionIndex = sections.findIndex((item) => sameSection(section, item))
   const pickedIndex = sections.findIndex((item) => sameSection(picked, item))
   const canMerge = sectionIndex >= 0 && pickedIndex >= 0 && sectionIndex !== pickedIndex
@@ -1800,9 +1918,16 @@ export function Studio() {
   undoRef.current = undoStudio
 
   useEffect(() => {
+    if (studio.style !== 'chrome') return undefined
+    editStudio((current) => (current.style === 'chrome' ? { ...current, style: 'image' } : current))
+    return undefined
+  }, [studio.style, editStudio])
+
+  useEffect(() => {
     if (studio.style !== 'image') return undefined
     prepareCollage({ style: 'image', images: (studio.images || []).map((image) => image.url) })
     prepareMosaic({ style: 'image', images: (studio.images || []).map((image) => image.url) })
+    prepareRiso({ style: 'image', images: (studio.images || []).map((image) => image.url) })
     return undefined
   }, [studio.style, studio.images])
 
@@ -1836,7 +1961,7 @@ export function Studio() {
                 onPointerUp={onPlaceUp}
                 onPointerCancel={onPlaceUp}
                 role={track && visualOn ? 'img' : undefined}
-                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && orbOn ? 'Orb reacting to the track' : track && chromeOn ? 'Chrome reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && risoOn ? 'Riso print of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && orbOn ? 'Orb reacting to the track' : track && chromeOn ? 'Chrome reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
               />
             )}
             {track && visualOn ? null : (
@@ -1848,7 +1973,7 @@ export function Studio() {
                     <Link className="canvas-upload" to="/upload">
                       Go to Upload
                     </Link>
-                    <p>{bloomOn ? 'Upload a track to see bloom.' : orbOn ? 'Upload a track to see orb.' : chromeOn ? 'Upload a track to see chrome.' : 'Upload a track to see liquid.'}</p>
+                    <p>{bloomOn ? 'Upload a track to see bloom.' : orbOn ? 'Upload a track to see orb.' : imageOn ? 'Upload a track to see the image.' : 'Upload a track to see liquid.'}</p>
                   </>
                 )}
               </div>
@@ -1872,6 +1997,8 @@ export function Studio() {
                 ? 'The frames share the photos you picked, as evenly as they can. The largest frame follows point 1 on the first photo, and the speed slider changes how quickly a smaller frame cuts to another point.'
                 : mosaicOn
                   ? 'The photo is rebuilt from small tiles that follow its shapes. A soft light moves across them: bass speeds it up, a beat catches a cluster, and a new photo arrives on a sweep of that light.'
+                  : risoOn
+                    ? explainRiso()
                   : imageOn
                     ? 'The grid is a halftone of the whole photo. Soft zones drift across and sharpen it where they pass. A strong bass hit fuses the darkest dots for a moment, and a beat sends a ripple through the grid.'
                     : explainPoster(poster)}
@@ -2089,7 +2216,7 @@ export function Studio() {
               </button>
             ) : (
               <p className="section-note">
-                {collageOn ? 'Add photos, then choose which ones this section uses. Point 1 on the first chosen photo fills the largest frame.' : mosaicOn ? 'Add a photo. The mosaic follows its shapes.' : 'Add a photo. Dark areas become larger dots.'}
+                {collageOn ? 'Add photos, then choose which ones this section uses. Point 1 on the first chosen photo fills the largest frame.' : mosaicOn ? 'Add a photo. The mosaic follows its shapes.' : risoOn ? 'Add a photo. Dark areas print in ink 1, lighter areas in ink 2.' : 'Add a photo. Dark areas become larger dots.'}
               </p>
             )}
             {collageOn ? null : (
@@ -2165,7 +2292,7 @@ export function Studio() {
                 </button>
               </>
             ) : null}
-            {imageOn && !collageOn && !mosaicOn ? (
+            {imageOn && !collageOn && !mosaicOn && !risoOn ? (
               <>
                 <p className="side-label">Dots</p>
                 <div className="swatches background-swatches" role="listbox" aria-label="Dots">
@@ -2267,6 +2394,80 @@ export function Studio() {
             >
               {backgroundApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
             </button>
+            {risoOn ? (
+              <>
+                <p className="side-label">Ink colors</p>
+                <div className="swatches background-swatches" role="listbox" aria-label="Ink colors">
+                  {inkChoices.map((choice) => {
+                    const slot = sectionInks.findIndex((hex) => hex.toLowerCase() === choice.hex.toLowerCase())
+                    const selected = slot >= 0
+                    return (
+                      <button
+                        key={`ink-${choice.label}-${choice.hex}`}
+                        type="button"
+                        className={selected ? 'swatch is-on' : 'swatch'}
+                        style={{ background: choice.hex }}
+                        aria-label={choice.label}
+                        aria-selected={selected}
+                        disabled={!section}
+                        onClick={(event) => {
+                          if (selected) {
+                            lastInkSlot.current = slot
+                            openPicker(event, {
+                              mode: 'edit',
+                              target: 'ink',
+                              slot,
+                              hex: choice.hex,
+                              previous: choice.hex,
+                              custom: Boolean(choice.custom),
+                            })
+                            return
+                          }
+                          const index = lastInkSlot.current === 0 ? 0 : 1
+                          const next = sectionInks.slice()
+                          next[index] = choice.hex
+                          setInksAck(null)
+                          writeSection({ inks: next })
+                          openPicker(event, {
+                            mode: 'edit',
+                            target: 'ink',
+                            slot: index,
+                            hex: choice.hex,
+                            previous: choice.hex,
+                            custom: Boolean(choice.custom),
+                            revert: sectionInks.slice(),
+                          })
+                        }}
+                      />
+                    )
+                  })}
+                  <button
+                    type="button"
+                    className="add-swatch"
+                    aria-label="Add an ink color"
+                    disabled={!section || inkChoices.length >= MAX_INKS}
+                    onClick={(event) =>
+                      openPicker(event, {
+                        mode: 'add',
+                        target: 'ink',
+                        slot: lastInkSlot.current === 0 ? 0 : 1,
+                        hex: '#d25a3a',
+                      })
+                    }
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={inksApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+                  disabled={!section || !sections.length}
+                  onClick={applyInks}
+                >
+                  {inksApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
+                </button>
+              </>
+            ) : null}
             {chromeOn ? (
               <>
                 <p className="side-label">Metal color</p>
@@ -2569,7 +2770,7 @@ export function Studio() {
           </>
         ) : null}
 
-        {collageOn || mosaicOn ? null : (
+        {collageOn || mosaicOn || risoOn ? null : (
           <>
             <div className="slider-labels">
               <span>Warm</span>
@@ -2723,8 +2924,16 @@ export function Studio() {
               <>
             {collageOn ? null : (
               <>
+                {risoOn ? <p className="side-label">Misregistration</p> : null}
                 <div className="slider-labels">
-                  <span>{imageOn ? 'Max dot size' : 'Shape size'}</span>
+                  {risoOn ? (
+                    <>
+                      <span>Subtle</span>
+                      <span>Wide</span>
+                    </>
+                  ) : (
+                    <span>{imageOn ? 'Max dot size' : 'Shape size'}</span>
+                  )}
                 </div>
                 <input
                   className="range"
@@ -2736,26 +2945,36 @@ export function Studio() {
                   onPointerUp={finishSlide}
                   onPointerCancel={finishSlide}
                   onChange={onSectionSize}
-                  aria-label={imageOn ? 'Max dot size' : 'Shape size'}
+                  aria-label={risoOn ? 'Misregistration' : imageOn ? 'Max dot size' : 'Shape size'}
                 />
               </>
             )}
+            {risoOn ? <p className="side-label">Grain size</p> : null}
             <div className="slider-labels">
-              <span>{collageOn ? 'Number of panels' : imageOn ? 'Dot density' : 'Number of shapes'}</span>
-              <span>{countValue}</span>
+              {risoOn ? (
+                <>
+                  <span>Fine</span>
+                  <span>Coarse</span>
+                </>
+              ) : (
+                <>
+                  <span>{collageOn ? 'Number of panels' : imageOn ? 'Dot density' : 'Number of shapes'}</span>
+                  <span>{countValue}</span>
+                </>
+              )}
             </div>
             <input
               className="range"
               type="range"
-              min={orbOn ? ORB_COUNT.min : chromeOn ? CHROME_COUNT.min : bloomOn ? BLOOM_COUNT.min : collageOn ? PANEL_COUNT.min : imageOn ? DOT_DENSITY.min : shapeRange.min}
-              max={orbOn ? ORB_COUNT.max : chromeOn ? CHROME_COUNT.max : bloomOn ? BLOOM_COUNT.max : collageOn ? PANEL_COUNT.max : imageOn ? DOT_DENSITY.max : shapeRange.max}
+              min={orbOn ? ORB_COUNT.min : chromeOn ? CHROME_COUNT.min : bloomOn ? BLOOM_COUNT.min : collageOn ? PANEL_COUNT.min : risoOn ? GRAIN_SIZE.min : imageOn ? DOT_DENSITY.min : shapeRange.min}
+              max={orbOn ? ORB_COUNT.max : chromeOn ? CHROME_COUNT.max : bloomOn ? BLOOM_COUNT.max : collageOn ? PANEL_COUNT.max : risoOn ? GRAIN_SIZE.max : imageOn ? DOT_DENSITY.max : shapeRange.max}
               step={orbOn ? 100 : 1}
               value={countValue}
               onPointerDown={startSlide}
               onPointerUp={finishSlide}
               onPointerCancel={finishSlide}
               onChange={onSectionCount}
-              aria-label={collageOn ? 'Number of panels' : imageOn ? 'Dot density' : 'Number of shapes'}
+              aria-label={risoOn ? 'Grain size' : collageOn ? 'Number of panels' : imageOn ? 'Dot density' : 'Number of shapes'}
             />
             {imageOn && !collageOn ? (
               <>
@@ -2997,6 +3216,11 @@ export function Studio() {
                 writeDotColors(next)
               }
               if (picker.target === 'metal' && isHex(hex)) writeSection({ metal: hex })
+              if (picker.target === 'ink' && picker.mode === 'edit' && isHex(hex)) {
+                const next = risoInksOf(studio.edits?.[activeKey]).slice()
+                next[picker.slot === 0 ? 0 : 1] = hex
+                writeSection({ inks: next })
+              }
             }}
           />
           <input
@@ -3014,6 +3238,11 @@ export function Studio() {
                 writeDotColors(next)
               }
               if (picker.target === 'metal' && isHex(hex)) writeSection({ metal: hex })
+              if (picker.target === 'ink' && picker.mode === 'edit' && isHex(hex)) {
+                const next = risoInksOf(studio.edits?.[activeKey]).slice()
+                next[picker.slot === 0 ? 0 : 1] = hex
+                writeSection({ inks: next })
+              }
             }}
           />
           <button type="submit" className="button" disabled={!isHex(picker.hex)}>
@@ -3045,7 +3274,7 @@ export function Studio() {
                 onPointerUp={onPlaceUp}
                 onPointerCancel={onPlaceUp}
                 role={track && visualOn ? 'img' : undefined}
-                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && orbOn ? 'Orb reacting to the track' : track && chromeOn ? 'Chrome reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
+                aria-label={track && collageOn ? 'Collage of the image' : track && mosaicOn ? 'Mosaic of the image' : track && risoOn ? 'Riso print of the image' : track && imageOn ? 'Halftone of the image' : track && bloomOn ? 'Bloom reacting to the track' : track && orbOn ? 'Orb reacting to the track' : track && chromeOn ? 'Chrome reacting to the track' : track && shapesOn ? 'Liquid reacting to the track' : undefined}
               />
             </div>,
             document.body,

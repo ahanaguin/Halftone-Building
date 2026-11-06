@@ -44,6 +44,7 @@ export function imageComposition(spec) {
   const saved = section ? spec.edits?.[sectionKey(section)]?.composition : spec.composition
   if (saved === 'collage') return 'collage'
   if (saved === 'mosaic') return 'mosaic'
+  if (saved === 'riso') return 'riso'
   return 'halftone'
 }
 
