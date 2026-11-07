@@ -125,6 +125,23 @@ function metalChoicesOf(studio, paletteSource) {
   return choices
 }
 
+function moveItem(list, from, to) {
+  if (!Array.isArray(list) || from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return list
+  const next = list.slice()
+  const [item] = next.splice(from, 1)
+  next.splice(to, 0, item)
+  return next
+}
+
+function paletteSignature(palette) {
+  const swatches = palette?.swatches || []
+  return `${palette?.warmth ?? 0.5}|${palette?.lightness ?? 0.5}|${swatches.map((swatch) => swatchHex(swatch).toLowerCase()).join('|')}`
+}
+
+function samePalette(left, right) {
+  return paletteSignature(left) === paletteSignature(right)
+}
+
 const STYLES = [
   { id: 'shapes', label: 'Liquid', ready: true },
   { id: 'bloom', label: 'Bloom', ready: true },
@@ -218,7 +235,10 @@ export function Studio() {
   const [compositionAck, setCompositionAck] = useState(null)
   const [filledAck, setFilledAck] = useState(null)
   const [dotColorAck, setDotColorAck] = useState(null)
+  const [colorModeAck, setColorModeAck] = useState(null)
   const [backgroundAck, setBackgroundAck] = useState(null)
+  const [paletteAck, setPaletteAck] = useState(null)
+  const [swatchMoving, setSwatchMoving] = useState(null)
   const [metalAck, setMetalAck] = useState(null)
   const [inksAck, setInksAck] = useState(null)
   const [dotsAck, setDotsAck] = useState(null)
@@ -247,6 +267,7 @@ export function Studio() {
   const studioRef = useRef(studio)
   const slideOrigin = useRef(null)
   const placeDrag = useRef(null)
+  const swatchDrag = useRef(null)
   const playToggle = useRef(null)
   const undoRef = useRef(null)
   const splitRef = useRef(null)
@@ -907,6 +928,26 @@ export function Studio() {
     showToast(filled ? 'Filled dots applied to all sections.' : 'Outline dots applied to all sections.')
   }
 
+  function applyColorMode() {
+    if (!sections.length) return
+    const mode = colorModeOf(studio.edits?.[activeKey])
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = false
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        if (colorModeOf(previous) === mode) continue
+        edits[key] = { ...previous, colorMode: mode }
+        changed = true
+      }
+      return changed ? { ...current, edits } : current
+    })
+    setColorModeAck(mode)
+    const name = COLOR_MODES.find((option) => option.id === mode)?.label || 'Color mode'
+    showToast(`${name} applied to all sections.`)
+  }
+
   function writeDotColors(list) {
     writeSection({ dotColors: list.slice(0, MAX_DOT_COLORS) })
   }
@@ -937,6 +978,128 @@ export function Studio() {
     })
     setDotColorAck(`${colorMode}:${colors.join('|').toLowerCase()}`)
     showToast('Dot colors applied to all sections.')
+  }
+
+  function applyPalette() {
+    if (!sections.length) return
+    const palette = {
+      ...activePalette,
+      swatches: (activePalette.swatches || []).map((swatch) => ({ ...swatch })),
+    }
+    const signature = paletteSignature(palette)
+    editStudio((current) => {
+      const edits = { ...(current.edits || {}) }
+      let changed = !samePalette(current.palette, palette)
+      for (const item of workingSections(track, current)) {
+        const key = sectionKey(item)
+        const previous = edits[key] || {}
+        const saved = previous.palette?.swatches?.length ? previous.palette : current.palette
+        if (samePalette(saved, palette)) continue
+        edits[key] = { ...previous, palette }
+        changed = true
+      }
+      return changed ? { ...current, palette, edits } : current
+    })
+    setPaletteAck(signature)
+    showToast('Palette applied to all sections.')
+  }
+
+  function reorderPaletteAt(from, to) {
+    setPaletteAck(null)
+    writePalette((palette) => {
+      const swatches = moveItem(palette.swatches, from, to)
+      if (swatches === palette.swatches) return palette
+      return { ...palette, source: 'custom', swatches }
+    })
+  }
+
+  function reorderDotsAt(from, to) {
+    const key = section ? sectionKey(section) : null
+    const edit = key ? studioRef.current.edits?.[key] : {}
+    const colors = moveItem(sectionInkColors(studioRef.current.style, edit || {}), from, to)
+    setDotColorAck(null)
+    writeDotColors(colors)
+  }
+
+  function swatchIndexFromPoint(kind, clientX, clientY) {
+    const nodes = [...document.querySelectorAll(`[data-swatch-kind="${kind}"]`)]
+    if (!nodes.length) return -1
+    let best = -1
+    let bestDist = Infinity
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect()
+      const dist = Math.hypot(clientX - (rect.left + rect.width / 2), clientY - (rect.top + rect.height / 2))
+      if (dist >= bestDist) continue
+      bestDist = dist
+      best = Number(node.dataset.swatchIndex)
+    }
+    return Number.isFinite(best) ? best : -1
+  }
+
+  function finishSwatchDrag(event) {
+    const drag = swatchDrag.current
+    if (!drag || drag.done || event.pointerId !== drag.id) return
+    drag.done = true
+    drag.cleanup?.()
+    swatchDrag.current = null
+    setSwatchMoving(null)
+    slideOrigin.current = null
+    if (drag.moved) {
+      const swallow = (click) => {
+        click.preventDefault()
+        click.stopPropagation()
+        window.removeEventListener('click', swallow, true)
+      }
+      window.addEventListener('click', swallow, true)
+      commitStudio(drag.origin)
+    }
+  }
+
+  function onSwatchMove(event) {
+    const drag = swatchDrag.current
+    if (!drag || drag.done || event.pointerId !== drag.id) return
+    const dist = Math.hypot(event.clientX - drag.x, event.clientY - drag.y)
+    if (!drag.moved && dist < 6) return
+    drag.moved = true
+    const over = swatchIndexFromPoint(drag.kind, event.clientX, event.clientY)
+    if (over < 0) return
+    if (over !== drag.from) {
+      if (drag.kind === 'palette') reorderPaletteAt(drag.from, over)
+      else reorderDotsAt(drag.from, over)
+      drag.from = over
+    }
+    setSwatchMoving({ kind: drag.kind, index: drag.from })
+  }
+
+  function startSwatchDrag(event, index, kind) {
+    if (event.button) return
+    swatchDrag.current?.cleanup?.()
+    slideOrigin.current = studioRef.current
+    const drag = {
+      id: event.pointerId,
+      kind,
+      from: index,
+      x: event.clientX,
+      y: event.clientY,
+      origin: studioRef.current,
+      done: false,
+      moved: false,
+      cleanup: null,
+    }
+    const move = (pointer) => onSwatchMove(pointer)
+    const up = (pointer) => {
+      if (pointer.pointerId !== drag.id) return
+      finishSwatchDrag(pointer)
+    }
+    drag.cleanup = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+    swatchDrag.current = drag
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
   }
 
   function applyBackground() {
@@ -1603,6 +1766,15 @@ export function Studio() {
         return hex.toLowerCase() === sectionBackground.toLowerCase()
       }),
   )
+  const paletteKeyNow = paletteSignature(activePalette)
+  const paletteUniform = Boolean(
+    sections.length &&
+      sections.every((item) => {
+        const saved = studio.edits?.[sectionKey(item)]?.palette
+        const current = saved?.swatches?.length ? saved : studio.palette
+        return paletteSignature(current) === paletteKeyNow
+      }),
+  )
   const sectionMetal = isHex(sectionEdit.metal) ? sectionEdit.metal : CHROME_SILVER
   const metalUniform = Boolean(
     sections.length &&
@@ -1652,7 +1824,12 @@ export function Studio() {
   if (compositionAck != null && !compositionUniform) setCompositionAck(null)
   if (filledAck != null && !filledUniform) setFilledAck(null)
   if (dotColorAck != null && !bloomColorUniform) setDotColorAck(null)
+  const colorModeUniform = Boolean(
+    sections.length && sections.every((item) => colorModeOf(studio.edits?.[sectionKey(item)]) === bloomColorMode),
+  )
+  if (colorModeAck != null && !colorModeUniform) setColorModeAck(null)
   if (backgroundAck != null && !backgroundUniform) setBackgroundAck(null)
+  if (paletteAck != null && !paletteUniform) setPaletteAck(null)
   if (metalAck != null && !metalUniform) setMetalAck(null)
   const sectionInks = risoInksOf(sectionEdit)
   const inksKey = sectionInks.map((hex) => hex.toLowerCase()).join('|')
@@ -1670,7 +1847,9 @@ export function Studio() {
   const compositionApplied = compositionAck === composition && compositionUniform
   const filledApplied = filledAck === filledOn && filledUniform
   const bloomColorApplied = dotColorAck === bloomColorKey && bloomColorUniform
+  const colorModeApplied = colorModeAck === bloomColorMode && colorModeUniform
   const backgroundApplied = backgroundAck === sectionBackground.toLowerCase() && backgroundUniform
+  const paletteApplied = paletteAck === paletteKeyNow && paletteUniform
   const metalApplied = metalAck === sectionMetal.toLowerCase() && metalUniform
   const metalChoices = metalChoicesOf(studio, activePalette)
   const inksApplied = inksAck === inksKey && inksUniform
@@ -2525,9 +2704,17 @@ export function Studio() {
               <>
                 <p className="side-label">Dot colors</p>
                 <div className="swatches background-swatches" role="listbox" aria-label="Dot colors">
-                  {bloomColors.map((hex, index) => (
-                    <button
+                  {bloomColors.map((hex, index) => {
+                    const moving = swatchMoving?.kind === 'dots' && swatchMoving.index === index
+                    return (
+                    <div
+                      className={moving ? 'swatch-item is-dragging' : 'swatch-item'}
                       key={`bloom-dot-${index}-${hex}`}
+                      data-swatch-kind="dots"
+                      data-swatch-index={index}
+                      onPointerDown={(event) => startSwatchDrag(event, index, 'dots')}
+                    >
+                    <button
                       type="button"
                       className="swatch is-on"
                       style={{ background: hex }}
@@ -2546,7 +2733,9 @@ export function Studio() {
                         })
                       }}
                     />
-                  ))}
+                    </div>
+                    )
+                  })}
                   <button
                     type="button"
                     className="add-swatch"
@@ -2582,6 +2771,7 @@ export function Studio() {
                         disabled={!section}
                         onChange={(event) => {
                           setDotColorAck(null)
+                          setColorModeAck(null)
                           writeSection({ colorMode: event.target.value })
                         }}
                       >
@@ -2592,6 +2782,14 @@ export function Studio() {
                         ))}
                       </select>
                     </label>
+                    <button
+                      type="button"
+                      className={colorModeApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+                      disabled={!section || !sections.length}
+                      onClick={applyColorMode}
+                    >
+                      {colorModeApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
+                    </button>
                   </>
                 ) : null}
               </>
@@ -2724,8 +2922,15 @@ export function Studio() {
             <div className="swatches">
               {activePalette.swatches.map((swatch, index) => {
                 const hex = swatchHex(swatch)
+                const moving = swatchMoving?.kind === 'palette' && swatchMoving.index === index
                 return (
-                  <div className="swatch-item" key={swatch.id}>
+                  <div
+                    className={moving ? 'swatch-item is-dragging' : 'swatch-item'}
+                    key={swatch.id}
+                    data-swatch-kind="palette"
+                    data-swatch-index={index}
+                    onPointerDown={(event) => startSwatchDrag(event, index, 'palette')}
+                  >
                     <button
                       type="button"
                       className="swatch"
@@ -2746,6 +2951,14 @@ export function Studio() {
                 +
               </button>
             </div>
+            <button
+              type="button"
+              className={paletteApplied ? 'button-redo apply-all is-on' : 'button-redo apply-all'}
+              disabled={!section || !sections.length}
+              onClick={applyPalette}
+            >
+              {paletteApplied ? 'Applied to all sections ✓' : 'Apply to all sections'}
+            </button>
           </>
         )}
 

@@ -366,18 +366,17 @@ export function shapeCount(recipe, count, composition) {
   return Math.min(range.max, Math.max(range.min, Math.round(value)))
 }
 
-export function leadColors(entries, sectionIndex, selectedIds) {
+export function leadColors(entries, _sectionIndex, selectedIds) {
   const source = (entries || []).filter((entry) => entry?.hex)
   let enabled = source
   if (selectedIds?.length >= 2) {
     const picked = source.filter((entry) => selectedIds.includes(entry.id))
     if (picked.length >= 2) enabled = picked
   }
-  if (enabled.length < 2) {
+  if (!enabled.length) {
     return source.length ? source.map((entry) => entry.hex) : ['#ff4d8d', '#ffd23a']
   }
-  const lead = ((sectionIndex % enabled.length) + enabled.length) % enabled.length
-  return [...enabled.slice(lead), ...enabled.slice(0, lead)].map((entry) => entry.hex)
+  return enabled.map((entry) => entry.hex).reverse()
 }
 
 export function posterStyle(colors, seed) {

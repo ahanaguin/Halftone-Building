@@ -289,16 +289,14 @@ function contrastOf(spec, time) {
   return 0.85 + (clamp(slider, 0, 100) / 100) * 1.05
 }
 
-function speedOf(spec, time) {
+function speedAmount(spec, time) {
   let slider = Number.isFinite(spec.speed) ? spec.speed : 50
   if (spec.sections?.length) {
     const section = sectionAt(spec.sections, time || 0)
     const saved = section ? spec.edits?.[sectionKey(section)]?.speed : null
     if (saved != null) slider = saved
   }
-  const t = clamp(slider, 0, 100) / 100
-  if (t <= 0.5) return Math.pow(8, t - 0.5)
-  return Math.pow(20, (t - 0.5) * 2)
+  return clamp(slider, 0, 100) / 100
 }
 
 function sectionSeedOf(spec, section, sections) {
@@ -413,11 +411,16 @@ function createState(spec) {
   const sections = spec.sections || []
   const first = sections[0]
   const seed = (sectionSeedOf(spec, first, sections) || 1) >>> 0
+  const rest = motionRest(spec, 0)
   return {
-    x1: 1.2,
-    y1: -0.9,
-    x2: -1.1,
-    y2: 1.0,
+    x1: rest.x1,
+    y1: rest.y1,
+    x2: rest.x2,
+    y2: rest.y2,
+    rest1x: rest.x1,
+    rest1y: rest.y1,
+    rest2x: rest.x2,
+    rest2y: rest.y2,
     v1x: 0,
     v1y: 0,
     v2x: 0,
@@ -438,15 +441,16 @@ function createState(spec) {
   }
 }
 
-function strongBeat(metrics, previous) {
+function strongBeat(metrics, previous, quiet) {
   if (!metrics || !previous) return false
   const bassJump = metrics.bass - previous.bass
   const highJump = metrics.high - previous.high
   const loudJump = metrics.loud - previous.loud
-  return (
-    (bassJump > 0.16 && metrics.bass > 0.45 && bassJump >= highJump) ||
-    (loudJump > 0.22 && metrics.loud > 0.62 && metrics.bass > 0.35)
-  )
+  if ((bassJump > 0.16 && metrics.bass > 0.45 && bassJump >= highJump) || (loudJump > 0.22 && metrics.loud > 0.62 && metrics.bass > 0.35)) {
+    return true
+  }
+  if (!quiet) return false
+  return (bassJump > 0.09 && metrics.bass > 0.26) || (loudJump > 0.11 && metrics.loud > 0.3)
 }
 
 function barLength(spec) {
@@ -464,10 +468,40 @@ function sectionProgress(section, time) {
 }
 
 function misScale(kind, progress) {
-  if (kind === 'Quiet' || kind === 'Intro' || kind === 'Break' || kind === 'Outro') return 0.18
-  if (kind === 'Build') return 0.45 + progress * 0.9
-  if (kind === 'Drop' || kind === 'Peak' || kind === 'High' || kind === 'Main') return 1.12
-  return 0.7
+  if (kind === 'Quiet' || kind === 'Intro' || kind === 'Break' || kind === 'Outro') return 0.62
+  if (kind === 'Build') return 0.8 + progress * 0.35
+  if (kind === 'Drop' || kind === 'Peak' || kind === 'High' || kind === 'Main') return 1.2
+  return 0.9
+}
+
+function motionRest(spec, time) {
+  const sections = spec.sections || []
+  const section = sectionAt(sections, time || 0) || sections[0]
+  const kind = labelKind(section?.label || '')
+  const quiet = kind === 'Quiet' || kind === 'Intro' || kind === 'Break' || kind === 'Outro'
+  const scale = misScale(kind, sectionProgress(section, time))
+  const mis = misregControl(spec, time)
+  const speed = speedAmount(spec, time)
+  const seed = (sectionSeedOf(spec, section, sections) || 1) >>> 0
+  const split = (2.4 + mis * 14.5) * scale
+  const wander = (1.4 + speed * 8.5) * (quiet ? 0.72 : 1)
+  const t = time || 0
+  return {
+    x1: split * 0.95 + Math.sin(t * 0.13 + seed * 0.001) * wander,
+    y1: -split * 0.72 + Math.cos(t * 0.1 + seed * 0.002) * wander * 0.88,
+    x2: -split * 0.9 + Math.sin(t * 0.16 + 2.1) * wander * 0.92,
+    y2: split * 0.78 + Math.cos(t * 0.09 + 1.4) * wander,
+  }
+}
+
+function layerOffsets(state, spec, time) {
+  const rest = motionRest(spec, time)
+  return {
+    x1: rest.x1 + (state.x1 - (state.rest1x ?? rest.x1)),
+    y1: rest.y1 + (state.y1 - (state.rest1y ?? rest.y1)),
+    x2: rest.x2 + (state.x2 - (state.rest2x ?? rest.x2)),
+    y2: rest.y2 + (state.y2 - (state.rest2y ?? rest.y2)),
+  }
 }
 
 function stepSpring(pos, vel, rest, dt) {
@@ -483,9 +517,8 @@ function step(state, time, dt, spec) {
   const previous = metricsAt(spec.profile, Math.max(0, time - dt))
   const kind = labelKind(section?.label || '')
   const quiet = kind === 'Quiet' || kind === 'Intro' || kind === 'Break' || kind === 'Outro'
-  const progress = sectionProgress(section, time)
-  const scale = misScale(kind, progress)
-  const speed = Math.sqrt(Math.max(0.18, speedOf(spec, time)))
+  const scale = misScale(kind, sectionProgress(section, time))
+  const speed = speedAmount(spec, time)
   const mis = misregControl(spec, time)
   const seed = (sectionSeedOf(spec, section, sections) || 1) >>> 0
   const beat = beatLength(spec)
@@ -523,12 +556,11 @@ function step(state, time, dt, spec) {
     }
   }
 
-  const drift = (quiet ? 0.65 : 1.7) * (0.55 + speed * 0.45)
-  const restAmp = (quiet ? 0.45 : 1.35) * (0.7 + mis * 0.6) * scale
-  const rest1x = Math.sin(time * 0.11 + seed * 0.001) * drift + 1.15 * restAmp
-  const rest1y = Math.cos(time * 0.09 + seed * 0.002) * drift * 0.85 - 0.85 * restAmp
-  const rest2x = Math.sin(time * 0.13 + 2.1) * drift * 0.9 - 1.05 * restAmp
-  const rest2y = Math.cos(time * 0.08 + 1.4) * drift + 0.95 * restAmp
+  const rest = motionRest(spec, time)
+  const rest1x = rest.x1
+  const rest1y = rest.y1
+  const rest2x = rest.x2
+  const rest2y = rest.y2
 
   const hits = biggestDropTimes(spec)
   const dropHit = hits.some((hit) => hit > time - dt - 0.02 && hit <= time + 0.001)
@@ -536,28 +568,28 @@ function step(state, time, dt, spec) {
   if (dropHit || dropEnter) {
     state.swap = 1
     state.dropTime = time
-    const kick = 10 + mis * 5
+    const kick = (12 + mis * 14) * (0.6 + speed * 0.7)
     const rand = mulberry32((seed ^ Math.imul(Math.floor(time * 30) + 3, 1664525)) >>> 0)
     const a1 = rand() * Math.PI * 2
     const a2 = a1 + Math.PI * (0.6 + rand() * 0.8)
-    state.v1x += Math.cos(a1) * kick * 18
-    state.v1y += Math.sin(a1) * kick * 18
-    state.v2x += Math.cos(a2) * kick * 18
-    state.v2y += Math.sin(a2) * kick * 18
+    state.v1x += Math.cos(a1) * kick * SPRING_W
+    state.v1y += Math.sin(a1) * kick * SPRING_W
+    state.v2x += Math.cos(a2) * kick * SPRING_W
+    state.v2y += Math.sin(a2) * kick * SPRING_W
   }
   const bar = barLength(spec)
   if (state.swap > 0) state.swap = Math.max(0, 1 - (time - state.dropTime) / Math.max(0.2, bar))
 
-  if (!quiet && strongBeat(metrics, previous) && time - state.lastBeat > 0.28) {
+  if (strongBeat(metrics, previous, quiet) && time - state.lastBeat > (quiet ? 0.4 : 0.26)) {
     state.lastBeat = time
-    const jump = (3 + mis * 5) * scale * (0.7 + speed * 0.35)
+    const jump = (8 + mis * 16) * scale * (0.45 + speed * 0.9) * (quiet ? 0.5 : 1)
     const rand = mulberry32((seed ^ Math.imul(Math.floor(time * 30) + 1, 1664525)) >>> 0)
     const a1 = rand() * Math.PI * 2
     const a2 = rand() * Math.PI * 2
-    state.v1x += Math.cos(a1) * jump * 22
-    state.v1y += Math.sin(a1) * jump * 22
-    state.v2x += Math.cos(a2) * jump * 22
-    state.v2y += Math.sin(a2) * jump * 22
+    state.v1x += Math.cos(a1) * jump * SPRING_W
+    state.v1y += Math.sin(a1) * jump * SPRING_W
+    state.v2x += Math.cos(a2) * jump * SPRING_W
+    state.v2y += Math.sin(a2) * jump * SPRING_W
   }
 
   const bassJump = (metrics?.bass ?? 0) - (previous?.bass ?? 0)
@@ -582,6 +614,10 @@ function step(state, time, dt, spec) {
   state.v2x = s2.vel
   state.y2 = t2.pos
   state.v2y = t2.vel
+  state.rest1x = rest1x
+  state.rest1y = rest1y
+  state.rest2x = rest2x
+  state.rest2y = rest2y
   state.density = 1 + state.pulse * 0.22 + (metrics?.bass ?? 0.2) * 0.05
 }
 
@@ -665,6 +701,7 @@ function paintCPU(ctx, spec, state, width, height) {
   const paper = paperAt(spec, time)
   const contrast = contrastOf(spec, time)
   const grain = grainPixels(grainControl(spec, time))
+  const off = layerOffsets(state, spec, time)
   const pass1 = passAmount(state, time, spec, 0)
   const pass2 = passAmount(state, time, spec, 0.5)
   const cur = photoAt(spec, state.imageIndex)
@@ -709,10 +746,10 @@ function paintCPU(ctx, spec, state, width, height) {
       const paperN = hash21(x, y, paperSeed)
       const mask1 = uvx < pass1 ? 1 : 0
       const mask2 = uvx < pass2 ? 1 : 0
-      const ux1 = uvx - state.x1 / width
-      const uy1 = uvy - state.y1 / height
-      const ux2 = uvx - state.x2 / width
-      const uy2 = uvy - state.y2 / height
+      const ux1 = uvx - off.x1 / width
+      const uy1 = uvy - off.y1 / height
+      const ux2 = uvx - off.x2 / width
+      const uy2 = uvy - off.y2 / height
       const cur1 = sample(cur, ux1, uy1)
       const prev1 = sample(prev, ux1, uy1)
       const cur2 = sample(cur, ux2, uy2)
@@ -805,8 +842,9 @@ export function paintRiso(ctx, spec) {
   gl.uniform3fv(location('uInk1'), channels(ink1))
   gl.uniform3fv(location('uInk2'), channels(ink2))
   const pixelScale = bufferWidth / Math.max(1, width)
-  gl.uniform2f(location('uOffset1'), state.x1 * pixelScale, state.y1 * pixelScale)
-  gl.uniform2f(location('uOffset2'), state.x2 * pixelScale, state.y2 * pixelScale)
+  const off = layerOffsets(state, spec, time)
+  gl.uniform2f(location('uOffset1'), off.x1 * pixelScale, off.y1 * pixelScale)
+  gl.uniform2f(location('uOffset2'), off.x2 * pixelScale, off.y2 * pixelScale)
   gl.uniform1f(location('uGrain'), grainPixels(grainControl(spec, time)) * pixelScale)
   gl.uniform1f(location('uGrainSalt'), state.grainSalt || 1)
   gl.uniform1f(location('uDensity'), state.density || 1)

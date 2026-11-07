@@ -556,13 +556,275 @@ h1 {
   margin-top: 28px;
 }
 
-.screen-landing {
+.screen-styles {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 28px 40px 32px;
+}
+
+.screen-styles-inner {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  width: min(1120px, 100%);
+  margin: 0 auto;
+}
+
+.screen-styles h1 {
+  font-size: 36px;
+}
+
+.style-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 16px;
+  min-height: 0;
+  margin-top: 20px;
+}
+
+.style-card {
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.style-card:hover {
+  border-color: #5a5a56;
+}
+
+.style-card.is-on,
+.style-card.is-on:hover {
+  border-color: #fff;
+}
+
+.style-card:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+.style-card-preview {
+  position: relative;
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #101010;
+}
+
+.style-card-preview canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.style-card-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #fff;
+  color: #111;
+}
+
+.style-card-check svg {
+  width: 16px;
+  height: 16px;
+}
+
+.style-card-copy {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px 16px;
+}
+
+.style-card-copy strong {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.style-card-copy > span:not(.style-tags) {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.style-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.style-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.style-actions {
+  flex: none;
+  margin-top: 20px;
+}
+
+.screen-landing {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+}
+
+.landing-hero {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  text-align: center;
+  min-height: 340px;
+  padding-top: 52px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.landing-aura {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: #ff1fa8;
+  pointer-events: none;
+}
+
+.landing-wash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  will-change: opacity;
+}
+
+.landing-wash-a {
+  background: #ff1fa8;
+  animation: landing-dissolve-a 28s ease-in-out infinite;
+}
+
+.landing-wash-b {
+  background: #7b2cff;
+  animation: landing-dissolve-b 28s ease-in-out infinite;
+}
+
+.landing-wash-c {
+  background: #265cff;
+  animation: landing-dissolve-c 28s ease-in-out infinite;
+}
+
+.landing-wash-d {
+  background: #ff2a6a;
+  animation: landing-dissolve-d 28s ease-in-out infinite;
+}
+
+@keyframes landing-dissolve-a {
+  0%,
+  18% {
+    opacity: 1;
+  }
+  25%,
+  93% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes landing-dissolve-b {
+  0%,
+  18% {
+    opacity: 0;
+  }
+  25%,
+  43% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes landing-dissolve-c {
+  0%,
+  43% {
+    opacity: 0;
+  }
+  50%,
+  68% {
+    opacity: 1;
+  }
+  75%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes landing-dissolve-d {
+  0%,
+  68% {
+    opacity: 0;
+  }
+  75%,
+  93% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.landing-trail {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.landing-hero .wordmark-title,
+.landing-hero .landing-start {
+  position: relative;
+  z-index: 2;
 }
 
 .rights-note {
@@ -581,11 +843,11 @@ h1 {
 }
 
 .screen-landing .rights-note {
-  position: absolute;
-  right: 0;
-  bottom: 28px;
-  left: 0;
-  margin: 0;
+  width: auto;
+  margin: 28px 0 0;
+  text-align: left;
+  white-space: normal;
+  max-width: calc(50vw - 96px);
 }
 
 .wordmark-title {
@@ -595,7 +857,7 @@ h1 {
 }
 
 .screen-landing .wordmark-title {
-  width: min(440px, 42vw);
+  width: min(420px, 36vw);
   aspect-ratio: 2172 / 151;
   overflow: hidden;
 }
@@ -609,19 +871,49 @@ h1 {
 
 .screen-landing .wordmark-title img {
   width: 100%;
-  margin-top: calc(min(440px, 42vw) * -284 / 2172);
+  margin-top: calc(min(420px, 36vw) * -284 / 2172);
+}
+
+.landing-copy {
+  flex: none;
+  padding: 64px 80px 56px;
+  background: var(--bg);
 }
 
 .landing-note {
-  max-width: 52ch;
-  margin: 28px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
+  max-width: calc(50vw - 96px);
+  margin: 0;
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1.35;
+  text-align: left;
 }
 
-.screen-landing .button {
+.landing-start {
   margin-top: 28px;
+  background: #111;
+  color: #fff;
+  transition: background 180ms ease, box-shadow 180ms ease;
+}
+
+.landing-start:hover {
+  background: #000;
+  color: #fff;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.28),
+    0 0 16px rgba(255, 255, 255, 0.42),
+    0 0 32px rgba(255, 255, 255, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-wash {
+    animation: none;
+    opacity: 0;
+  }
+
+  .landing-wash-a {
+    opacity: 1;
+  }
 }
 
 .sidebar {
@@ -975,7 +1267,8 @@ h1 {
   margin-top: 8px;
 }
 
-.background-swatches + .apply-all {
+.background-swatches + .apply-all,
+.swatches + .apply-all {
   margin-top: 16px;
 }
 
@@ -1098,6 +1391,13 @@ button.swatch {
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.swatch-item.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
 }
 
 .swatch {
@@ -1701,6 +2001,11 @@ button.swatch {
 .button:disabled {
   opacity: 0.4;
   cursor: default;
+  pointer-events: none;
+}
+
+.button:disabled:hover {
+  background: #fff;
 }
 
 .calibrate {
