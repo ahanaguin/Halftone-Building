@@ -12,6 +12,8 @@ import {
   saveCalibration,
   soundSrc,
 } from './calibrate.js'
+import { StepIntro } from './StepIntro.jsx'
+import { hasSeenIntro, shouldShowStepIntro } from './stepIntro.js'
 import { useTrack } from './track.jsx'
 
 const SHAPES = [
@@ -61,8 +63,10 @@ export function Calibrate() {
   const location = useLocation()
   const saved = useRef(loadCalibration())
   const { replaceStudio, setCalibrateChrome, registerCalibrateSkip } = useTrack()
-  const [phase, setPhase] = useState(() => (location.state?.revise && saved.current?.answers ? 'questions' : 'intro'))
-  const [ready, setReady] = useState(false)
+  const [phase, setPhase] = useState(() => {
+    if (location.state?.revise && saved.current?.answers) return 'questions'
+    return shouldShowStepIntro('calibrate', location) ? 'intro' : 'questions'
+  })
   const [index, setIndex] = useState(0)
   const [answers, setAnswers] = useState(() => saved.current?.answers || {})
   const [extraColors, setExtraColors] = useState(() => customColors(saved.current?.answers))
@@ -80,11 +84,6 @@ export function Calibrate() {
   const sound = SEQUENCE[index]
   const pick = answers[sound.id] || {}
   const readyPick = Boolean(pick.color && pick.shape && pick.texture)
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setReady(true), 650)
-    return () => window.clearTimeout(timer)
-  }, [])
 
   useEffect(() => {
     const urls = images.map((file) => URL.createObjectURL(file))
@@ -139,7 +138,6 @@ export function Calibrate() {
   }, [phase, index, setCalibrateChrome])
 
   function begin() {
-    if (!ready) return
     setPhase('questions')
     setIndex(0)
     playAt(0)
@@ -250,26 +248,11 @@ export function Calibrate() {
   const choices = [...CALIBRATION_COLORS, ...extraColors]
 
   return (
-    <main className={phase === 'intro' ? 'calibrate calibrate-intro' : 'calibrate'}>
+    <>
       {phase === 'intro' ? (
-        <div className="cal-intro">
-          <p className="cal-kicker">Step 1 of 4</p>
-          <h1>Calibrate</h1>
-          <p>
-            Pick a color, shape, and texture for 15 short sounds. Takes about 3 minutes, we're trying to get to know
-            the way you see things. There are no wrong answers, be imaginative.
-          </p>
-          <div className="step-bars" aria-hidden="true">
-            <span className="fill" />
-            <span />
-            <span />
-            <span />
-          </div>
-          <button type="button" className="button" onClick={begin} disabled={!ready}>
-            Begin
-          </button>
-        </div>
+        <StepIntro id="calibrate" replay={hasSeenIntro('calibrate')} onFinished={begin} />
       ) : (
+    <main className="calibrate">
         <div className="cal-questions">
           <section className="cal-main">
             <div className="cal-head">
@@ -413,14 +396,16 @@ export function Calibrate() {
             </div>
           </aside>
         </div>
+    </main>
       )}
       <audio
         ref={audioRef}
+        hidden
         preload="auto"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
       />
-    </main>
+    </>
   )
 }

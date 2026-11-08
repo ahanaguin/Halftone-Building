@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { hasCalibration } from './calibrate.js'
+import { beginIntroFlow } from './stepIntro.js'
 import { loadVisuals } from './visuals.js'
 import { Wordmark } from './Wordmark.jsx'
 
@@ -148,7 +149,11 @@ export function Landing() {
         <h1 className="wordmark-title">
           <Wordmark />
         </h1>
-        <Link className="button landing-start" to={hasCalibration() ? '/upload' : '/calibrate'}>
+        <Link
+          className="button landing-start"
+          to={hasCalibration() ? '/upload' : '/calibrate'}
+          onClick={() => beginIntroFlow(!hasCalibration())}
+        >
           Start now
         </Link>
       </section>

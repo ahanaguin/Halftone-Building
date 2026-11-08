@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { useIntroLock } from './StepIntro.jsx'
 import { useTrack } from './track.jsx'
 import { Wordmark } from './Wordmark.jsx'
 
@@ -60,6 +61,7 @@ export function Shell() {
   const [open, setOpen] = useState(false)
   const location = useLocation()
   const { track, calibrateChrome, skipCalibration } = useTrack()
+  const introLock = useIntroLock()
   const studio = location.pathname === '/studio'
   const exportPage = location.pathname === '/export'
   const menuRef = useRef(null)
@@ -73,10 +75,7 @@ export function Shell() {
     if (!open) return undefined
     closeRef.current?.focus()
     function onKey(event) {
-      if (event.key === 'Escape') {
-        setOpen(false)
-        menuRef.current?.focus()
-      }
+      if (event.key === 'Escape') setOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -84,7 +83,6 @@ export function Shell() {
 
   function closeMenu() {
     setOpen(false)
-    menuRef.current?.focus()
   }
 
   return (
@@ -124,22 +122,24 @@ export function Shell() {
       <div className="app-main">
         <header className="topbar">
           <div className="topbar-brand">
-            <button
-              ref={menuRef}
-              type="button"
-              className="icon-button"
-              aria-label="Menu"
-              aria-expanded={open}
-              onClick={() => setOpen(true)}
-            >
-              <Hamburger />
-            </button>
+            {open ? null : (
+              <button
+                ref={menuRef}
+                type="button"
+                className="icon-button"
+                aria-label="Menu"
+                aria-expanded={false}
+                onClick={() => setOpen(true)}
+              >
+                <Hamburger />
+              </button>
+            )}
             <Link to="/" className="topbar-logo">
               <Wordmark className="topbar-mark" />
             </Link>
           </div>
-          {studio ? <p className="topbar-track">{track?.fileName ?? 'No track yet'}</p> : null}
-          {calibrateChrome ? (
+          {introLock ? null : studio ? <p className="topbar-track">{track?.fileName ?? 'No track yet'}</p> : null}
+          {introLock ? null : calibrateChrome ? (
             <div className="cal-meter">
               <span>{calibrateChrome.label}</span>
               <span className="cal-meter-track" aria-hidden="true">
@@ -147,7 +147,7 @@ export function Shell() {
               </span>
             </div>
           ) : null}
-          {studio ? (
+          {introLock ? null : studio ? (
             <div className="studio-actions">
               <Link to="/pick-a-style" className="text-link back-styles">
                 {'< Back to styles'}
@@ -160,7 +160,7 @@ export function Shell() {
             <button type="button" className="text-link cal-skip" onClick={skipCalibration}>
               Skip calibration &gt;
             </button>
-          ) : exportPage ? (
+          ) : exportPage || location.pathname === '/pick-a-style' ? (
             <p className="topbar-status">{track?.fileName ?? 'No track yet'}</p>
           ) : location.pathname === '/upload' ? (
             <p className="topbar-status">Palette saved</p>
