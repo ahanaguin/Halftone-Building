@@ -202,7 +202,7 @@ a {
 .upload h1 {
   font-size: 28px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.02em;
 }
 
 .drop {
@@ -567,7 +567,7 @@ h1 {
   font-family: "SF Pro Display", "SF Pro Text", "SF Pro", -apple-system, sans-serif;
   font-size: 28px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.02em;
   line-height: 1.05;
 }
 
@@ -2235,7 +2235,7 @@ button.swatch {
   margin: 0;
   font-size: 28px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.02em;
 }
 
 .cal-head p {
@@ -2544,7 +2544,7 @@ button.swatch {
   margin: 0;
   font-size: 28px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.02em;
 }
 
 .export-lede,
