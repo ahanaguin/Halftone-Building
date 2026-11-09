@@ -5,8 +5,9 @@ import {
   CALIBRATION_SOUNDS,
   ROLE_SWATCHES,
   colorsFromImages,
+  extraPaletteSwatches,
   fillCalibration,
-  filledGroups,
+  groupColor,
   loadCalibration,
   paletteFromCalibration,
   resultFromAnswers,
@@ -216,23 +217,35 @@ export function MyPalette() {
 
   const answers = saved?.answers || {}
   const references = saved?.references || []
-  const groups = filledGroups(saved)
+  const extras = extraPaletteSwatches(saved)
   const draft = picker?.draft
 
   const palette = useMemo(() => {
-    const nextGroups = { ...groups }
-    const nextRefs = references.slice()
-    if (draft?.kind === 'role' && isHex(draft.hex)) nextGroups[draft.key] = draft.hex
-    if (draft?.kind === 'reference' && isHex(draft.hex) && nextRefs[draft.index] != null) nextRefs[draft.index] = draft.hex
-    if (draft?.kind === 'answer' && isHex(draft.hex) && editor) {
-      const result = fillCalibration(
-        resultFromAnswers({ ...answers, [editor]: { ...answers[editor], color: draft.hex } }, nextRefs),
-        saved,
-      )
-      return paletteFromCalibration(result)
+    let nextAnswers = answers
+    let nextRefs = references
+    let nextGroups = { ...(saved?.groups || {}) }
+    if (draft?.kind === 'role' && isHex(draft.hex)) {
+      const role = ROLE_SWATCHES.find((item) => item.key === draft.key)
+      nextAnswers = { ...nextAnswers, [role.soundId]: { ...nextAnswers[role.soundId], color: draft.hex } }
+      nextGroups = { ...nextGroups, [draft.key]: draft.hex }
     }
-    return paletteFromCalibration({ groups: nextGroups, references: nextRefs })
-  }, [answers, draft, editor, groups, references, saved])
+    if (draft?.kind === 'extra' && isHex(draft.hex) && draft.soundId) {
+      nextAnswers = { ...nextAnswers, [draft.soundId]: { ...nextAnswers[draft.soundId], color: draft.hex } }
+    }
+    if (draft?.kind === 'reference' && isHex(draft.hex) && nextRefs[draft.index] != null) {
+      nextRefs = nextRefs.slice()
+      nextRefs[draft.index] = draft.hex
+    }
+    if (draft?.kind === 'answer' && isHex(draft.hex) && editor) {
+      nextAnswers = { ...nextAnswers, [editor]: { ...nextAnswers[editor], color: draft.hex } }
+    }
+    return paletteFromCalibration({
+      ...saved,
+      answers: nextAnswers,
+      groups: nextGroups,
+      references: nextRefs,
+    })
+  }, [answers, draft, editor, references, saved])
 
   const colors = paletteColors(palette)
   const roundness = saved?.roundness ?? 0.7
@@ -316,6 +329,8 @@ export function MyPalette() {
         [role.soundId]: { ...answers[role.soundId], color: hex },
       }
       commitAnswers(nextAnswers)
+    } else if (picker.kind === 'extra' && picker.soundId) {
+      commitAnswers({ ...answers, [picker.soundId]: { ...answers[picker.soundId], color: hex } })
     } else if (picker.kind === 'reference') {
       const nextRefs = references.slice()
       nextRefs[picker.index] = hex
@@ -408,40 +423,63 @@ export function MyPalette() {
         <section className="palette-panel">
           <h2>Your colors</h2>
           <div className="palette-colors">
-            <div className="palette-swatches">
-              {ROLE_SWATCHES.map((role) => {
-                const hex = draft?.kind === 'role' && draft.key === role.key && isHex(draft.hex) ? draft.hex : groups[role.key]
-                const selected = picker?.kind === 'role' && picker.key === role.key
-                return (
-                  <button
-                    key={role.key}
-                    type="button"
-                    className={selected ? 'palette-swatch is-open' : 'palette-swatch'}
-                    onClick={(event) => openPicker(event, { kind: 'role', key: role.key, hex, mode: 'edit' })}
-                  >
-                    <span className="palette-chip" style={{ background: hex }} />
-                    <span className="palette-swatch-label">{role.label}</span>
-                    <span className="palette-swatch-hint">{role.hint}</span>
-                  </button>
-                )
-              })}
-              {references.map((color, index) => {
-                const hex =
-                  draft?.kind === 'reference' && draft.index === index && isHex(draft.hex) ? draft.hex : color
-                const selected = picker?.kind === 'reference' && picker.index === index
-                return (
-                  <button
-                    key={`ref-${index}-${color}`}
-                    type="button"
-                    className={selected ? 'palette-swatch is-open' : 'palette-swatch'}
-                    onClick={(event) => openPicker(event, { kind: 'reference', index, hex, mode: 'edit' })}
-                  >
-                    <span className="palette-chip" style={{ background: hex }} />
-                    <span className="palette-swatch-label">From your images</span>
-                    <span className="palette-swatch-hint">Pulled from reference photos</span>
-                  </button>
-                )
-              })}
+            <div className="palette-swatch-col">
+              <div className="palette-swatches">
+                {ROLE_SWATCHES.map((role) => {
+                  const base = groupColor(saved, role.key)
+                  const hex = draft?.kind === 'role' && draft.key === role.key && isHex(draft.hex) ? draft.hex : base
+                  if (!hex) return null
+                  const selected = picker?.kind === 'role' && picker.key === role.key
+                  return (
+                    <button
+                      key={role.key}
+                      type="button"
+                      className={selected ? 'palette-swatch is-open' : 'palette-swatch'}
+                      onClick={(event) => openPicker(event, { kind: 'role', key: role.key, hex, mode: 'edit' })}
+                    >
+                      <span className="palette-chip" style={{ background: hex }} />
+                      <span className="palette-swatch-label">{role.label}</span>
+                      <span className="palette-swatch-hint">{role.hint}</span>
+                    </button>
+                  )
+                })}
+                {extras.map((item) => {
+                  const hex =
+                    draft?.kind === 'extra' && draft.soundId === item.soundId && isHex(draft.hex) ? draft.hex : item.color
+                  const selected = picker?.kind === 'extra' && picker.soundId === item.soundId
+                  return (
+                    <button
+                      key={item.soundId}
+                      type="button"
+                      className={selected ? 'palette-swatch is-open' : 'palette-swatch'}
+                      onClick={(event) =>
+                        openPicker(event, { kind: 'extra', soundId: item.soundId, hex, mode: 'edit' })
+                      }
+                    >
+                      <span className="palette-chip" style={{ background: hex }} />
+                      <span className="palette-swatch-label">{item.label}</span>
+                      <span className="palette-swatch-hint">{item.hint}</span>
+                    </button>
+                  )
+                })}
+                {references.map((color, index) => {
+                  const hex =
+                    draft?.kind === 'reference' && draft.index === index && isHex(draft.hex) ? draft.hex : color
+                  const selected = picker?.kind === 'reference' && picker.index === index
+                  return (
+                    <button
+                      key={`ref-${index}-${color}`}
+                      type="button"
+                      className={selected ? 'palette-swatch is-open' : 'palette-swatch'}
+                      onClick={(event) => openPicker(event, { kind: 'reference', index, hex, mode: 'edit' })}
+                    >
+                      <span className="palette-chip" style={{ background: hex }} />
+                      <span className="palette-swatch-label">From your images</span>
+                      <span className="palette-swatch-hint">Pulled from reference photos</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
             <PaletteLivePreview colors={colors} roundness={roundness} />
           </div>

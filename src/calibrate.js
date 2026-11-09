@@ -14,6 +14,7 @@ export const DEFAULT_GROUPS = {
 
 export const ROLE_SWATCHES = [
   { key: 'low', label: 'Low sounds', hint: 'Big, low shapes', soundId: '01-pitch-low' },
+  { key: 'mid', label: 'Mid sounds', hint: 'The middle range', soundId: '02-pitch-mid' },
   { key: 'high', label: 'High sounds', hint: 'Small accents', soundId: '03-pitch-high' },
   { key: 'major', label: 'Bright, major sounds', hint: 'Energetic sections', soundId: '06-major-chord' },
   { key: 'minor', label: 'Dark, minor sounds', hint: 'Calm sections', soundId: '07-minor-chord' },
@@ -121,6 +122,37 @@ export function filledGroups(saved) {
   return groups
 }
 
+export function groupColor(saved, key) {
+  const role = ROLE_SWATCHES.find((item) => item.key === key)
+  const fromAnswer = role ? saved?.answers?.[role.soundId]?.color : null
+  if (fromAnswer) return fromAnswer
+  if (saved?.groups?.[key] && !saved.skipped) return saved.groups[key]
+  if (!saved || saved.skipped) return DEFAULT_GROUPS[key]
+  return null
+}
+
+export function extraPaletteSwatches(saved) {
+  const used = new Set()
+  for (const role of ROLE_SWATCHES) {
+    const color = groupColor(saved, role.key)
+    if (color) used.add(color.toLowerCase())
+  }
+  const extras = []
+  for (const sound of SOUNDS) {
+    if (ROLE_SWATCHES.some((role) => role.soundId === sound.id)) continue
+    const color = saved?.answers?.[sound.id]?.color
+    if (!color || used.has(color.toLowerCase())) continue
+    used.add(color.toLowerCase())
+    extras.push({
+      soundId: sound.id,
+      label: sound.title,
+      hint: 'From your sound map',
+      color,
+    })
+  }
+  return extras
+}
+
 export function fillCalibration(result, previous) {
   const groups = {
     ...DEFAULT_GROUPS,
@@ -158,25 +190,23 @@ export function studioFromCalibration(saved) {
 }
 
 export function paletteFromCalibration(saved) {
-  const ordered = [
-    saved.groups.low,
-    saved.groups.mid,
-    saved.groups.high,
-    saved.groups.major,
-    saved.groups.minor,
-    ...(saved.references || []),
-  ]
-  const unique = []
-  for (const color of ordered) {
-    if (!color) continue
-    if (unique.some((item) => sameColor(item, color))) continue
-    unique.push(color)
+  const ordered = []
+  const add = (color) => {
+    if (!color) return
+    if (ordered.some((item) => sameColor(item, color))) return
+    ordered.push(color)
+  }
+  for (const role of ROLE_SWATCHES) add(groupColor(saved, role.key))
+  for (const extra of extraPaletteSwatches(saved)) add(extra.color)
+  for (const color of saved?.references || []) add(color)
+  if (!ordered.length) {
+    for (const color of Object.values(DEFAULT_GROUPS)) add(color)
   }
   return {
-    source: 'custom',
+    source: saved?.skipped ? 'default' : 'custom',
     warmth: 0.5,
     lightness: 0.5,
-    swatches: unique.map((color) => swatchFromHex(color)),
+    swatches: ordered.map((color) => swatchFromHex(color)),
   }
 }
 

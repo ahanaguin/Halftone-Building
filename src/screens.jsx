@@ -176,16 +176,7 @@ export { PickStyle } from './StylePicker.jsx'
 
 export { MyPalette } from './MyPalette.jsx'
 
-export function HowItWorks() {
-  return (
-    <main className="screen">
-      <div className="screen-inner">
-        <h1>How it works</h1>
-        <p className="lede">A short guide will live here.</p>
-      </div>
-    </main>
-  )
-}
+export { HowItWorks } from './HowItWorks.jsx'
 
 export function SendFeedback() {
   return (
