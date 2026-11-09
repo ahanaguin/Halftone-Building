@@ -48,6 +48,7 @@ import { INK_BLACK, PAPER, SHAPE_RANGE, backgroundAt, explainPoster, isHex, pick
 import { mountShapes } from './shapesSketch.js'
 import { TUNE_DEFAULTS } from './metaballs.js'
 import { useTrack } from './track.jsx'
+import { useVisualSession } from './visualSession.jsx'
 
 const FORMATS = ['9:16', '1:1', '16:9']
 const MAX_BACKGROUNDS = 8
@@ -219,7 +220,8 @@ function CloseIcon() {
 
 export function Studio() {
   const { track, studio, editStudio, syncStudio, commitStudio, undoStudio } = useTrack()
-  const [format, setFormat] = useState('16:9')
+  const { saveNow } = useVisualSession()
+  const [format, setFormat] = useState(studio.format || '16:9')
   const [section, setSection] = useState(null)
   const [picked, setPicked] = useState(null)
   const [expanded, setExpanded] = useState(false)
@@ -275,6 +277,7 @@ export function Studio() {
   const renameCommit = useRef(false)
   const lastInkSlot = useRef(1)
   const sizeRef = useRef(size)
+  const formatRef = useRef(format)
   const liveRef = useRef({
     loud: 0.35,
     bass: 0.4,
@@ -305,6 +308,7 @@ export function Studio() {
 
   studioRef.current = studio
   sizeRef.current = size
+  formatRef.current = format
   expandedRef.current = expanded
   if (track?.profile?.timeline) profileRef.current = track.profile
   const sections = workingSections(track, studio)
@@ -363,7 +367,9 @@ export function Studio() {
         })
       }
     }
-    setSection(list[0] ?? null)
+    const time = Number(track.playhead) || 0
+    const match = list.find((item) => time >= item.start && time < item.end) || list[0]
+    setSection(match ?? null)
     setPicked(null)
     setRenaming(null)
     setResetAsk(false)
@@ -564,6 +570,29 @@ export function Studio() {
   }, [track])
 
   useEffect(() => () => audioRef.current?.pause(), [])
+
+  useEffect(() => {
+    if (!track?.file) return undefined
+    const snapshot = () =>
+      saveNow({
+        view: {
+          format: formatRef.current,
+          playhead: audioRef.current?.currentTime || 0,
+        },
+      })
+    const interval = window.setInterval(snapshot, 30000)
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') snapshot()
+    }
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', snapshot)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', snapshot)
+      snapshot()
+    }
+  }, [track?.file, saveNow])
 
   function connect(audio) {
     if (graphRef.current?.audio === audio) return graphRef.current
@@ -1237,6 +1266,7 @@ export function Studio() {
       const added = files.slice(0, Math.max(0, 5 - images.length)).map((file) => ({
         id: crypto.randomUUID(),
         name: file.name,
+        blob: file,
         url: URL.createObjectURL(file),
       }))
       if (!added.length) return current
@@ -1246,6 +1276,8 @@ export function Studio() {
 
   function removeImage(id) {
     editStudio((current) => {
+      const dropped = (current.images || []).find((image) => image.id === id)
+      if (dropped?.url) URL.revokeObjectURL(dropped.url)
       const images = (current.images || []).filter((image) => image.id !== id)
       const edits = { ...(current.edits || {}) }
       for (const key of Object.keys(edits)) {
@@ -2120,7 +2152,10 @@ export function Studio() {
               type="button"
               className={item === format ? 'format active' : 'format'}
               aria-pressed={item === format}
-              onClick={() => setFormat(item)}
+              onClick={() => {
+                setFormat(item)
+                syncStudio((current) => (current.format === item ? current : { ...current, format: item }))
+              }}
             >
               {item}
             </button>
@@ -2326,6 +2361,10 @@ export function Studio() {
           ref={audioRef}
           src={audioUrl || undefined}
           preload="auto"
+          onLoadedMetadata={(event) => {
+            const time = Number(track?.playhead) || 0
+            if (time > 0) event.currentTarget.currentTime = Math.min(time, event.currentTarget.duration || time)
+          }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
         />

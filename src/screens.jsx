@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { hasCalibration } from './calibrate.js'
 import { beginIntroFlow } from './stepIntro.js'
-import { loadVisuals } from './visuals.js'
+import { useVisualSession } from './visualSession.jsx'
 import { Wordmark } from './Wordmark.jsx'
 
 function LandingAura() {
@@ -141,6 +141,7 @@ export const RIGHTS_NOTE =
   "Only upload music and images you own or have permission to use. You're responsible for what you create and share with Halftone."
 
 export function Landing() {
+  const { beginNewVisual } = useVisualSession()
   return (
     <main className="screen-landing">
       <section className="landing-hero">
@@ -152,7 +153,10 @@ export function Landing() {
         <Link
           className="button landing-start"
           to={hasCalibration() ? '/upload' : '/calibrate'}
-          onClick={() => beginIntroFlow(!hasCalibration())}
+          onClick={() => {
+            beginNewVisual()
+            beginIntroFlow(!hasCalibration())
+          }}
         >
           Start now
         </Link>
@@ -169,35 +173,6 @@ export function Landing() {
 }
 
 export { PickStyle } from './StylePicker.jsx'
-
-export function MyVisuals() {
-  const visuals = loadVisuals()
-  return (
-    <main className="screen">
-      <div className="screen-inner visuals">
-        <h1>My visuals</h1>
-        {visuals.length ? (
-          <ul className="visual-list">
-            {visuals.map((item) => (
-              <li key={item.id}>
-                <strong>{item.fileName}</strong>
-                <span>{item.style}</span>
-                <time dateTime={new Date(item.createdAt).toISOString()}>
-                  {new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </time>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="lede">Nothing here yet.</p>
-        )}
-        <Link className="button" to="/">
-          New visual
-        </Link>
-      </div>
-    </main>
-  )
-}
 
 export function MyPalette() {
   return (

@@ -7,15 +7,9 @@ const STYLES = [
     id: 'shapes',
     name: 'Liquid',
     tags: 'Free, Mirror, Quad, Radial',
-    video: '/style-previews/liquid.mp4',
-    poster: '/style-previews/liquid.jpg',
-  },
-  {
-    id: 'image',
-    name: 'Image animation',
-    tags: 'Halftone, Collage, Mosaic, Riso',
-    video: '/style-previews/image.mp4?v=2',
-    poster: '/style-previews/image.jpg?v=2',
+    video: '/style-previews/liquid.mp4?v=3',
+    poster: '/style-previews/liquid.jpg?v=3',
+    fit: 'liquid',
   },
   {
     id: 'bloom',
@@ -33,7 +27,22 @@ const STYLES = [
     poster: '/style-previews/orb.jpg?v=6',
     fit: 'wide',
   },
+  {
+    id: 'image',
+    name: 'Image animation',
+    tags: 'Halftone, Collage, Mosaic, Riso',
+    video: '/style-previews/image.mp4?v=2',
+    poster: '/style-previews/image.jpg?v=2',
+    fit: 'image',
+  },
 ]
+
+function previewClass(fit) {
+  if (fit === 'wide') return 'style-card-preview is-wide'
+  if (fit === 'liquid') return 'style-card-preview is-wide is-liquid'
+  if (fit === 'image') return 'style-card-preview is-wide is-image'
+  return 'style-card-preview'
+}
 
 function StyleCard({ item, selected, live, onSelect, onHover, onLeave }) {
   const videoRef = useRef(null)
@@ -65,7 +74,7 @@ function StyleCard({ item, selected, live, onSelect, onHover, onLeave }) {
       onPointerEnter={() => onHover(item.id)}
       onPointerLeave={onLeave}
     >
-      <span className={item.fit === 'wide' ? 'style-card-preview is-wide' : 'style-card-preview'}>
+      <span className={previewClass(item.fit)}>
         <video
           ref={videoRef}
           poster={item.poster}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useIntroLock } from './StepIntro.jsx'
 import { useTrack } from './track.jsx'
+import { useVisualSession } from './visualSession.jsx'
 import { Wordmark } from './Wordmark.jsx'
 
 const PRIMARY = [
@@ -44,13 +45,14 @@ function Caret() {
   )
 }
 
-function NavItems({ items }) {
+function NavItems({ items, onNewVisual }) {
   return items.map((item) => (
     <NavLink
       key={item.to}
       to={item.to}
       end={item.end}
       className={({ isActive }) => (isActive ? 'active' : undefined)}
+      onClick={item.to === '/' ? onNewVisual : undefined}
     >
       {item.label}
     </NavLink>
@@ -61,6 +63,7 @@ export function Shell() {
   const [open, setOpen] = useState(false)
   const location = useLocation()
   const { track, calibrateChrome, skipCalibration } = useTrack()
+  const { status: saveStatus, beginNewVisual } = useVisualSession()
   const introLock = useIntroLock()
   const studio = location.pathname === '/studio'
   const exportPage = location.pathname === '/export'
@@ -106,7 +109,7 @@ export function Shell() {
             </button>
           </div>
           <nav className="nav" onClick={closeMenu}>
-            <NavItems items={PRIMARY} />
+            <NavItems items={PRIMARY} onNewVisual={beginNewVisual} />
           </nav>
           <div className="sidebar-bottom">
             <nav className="nav nav-bottom" onClick={closeMenu}>
@@ -149,6 +152,7 @@ export function Shell() {
           ) : null}
           {introLock ? null : studio ? (
             <div className="studio-actions">
+              {saveStatus === 'saved' ? <span className="save-indicator">Saved</span> : null}
               <Link to="/pick-a-style" className="text-link back-styles">
                 {'< Back to styles'}
               </Link>

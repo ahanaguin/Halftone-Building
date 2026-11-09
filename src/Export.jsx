@@ -20,19 +20,7 @@ import { ExportCancelled, prepareEncoder, renderCover, renderFilm, renderLoop, r
 import { profileTrack } from './profileTrack.js'
 import { workingSections } from './sectionEdit.js'
 import { useTrack } from './track.jsx'
-import { saveVisual } from './visuals.js'
-
-const STYLE_LABELS = {
-  shapes: 'Liquid',
-  halftone: 'Halftone',
-  bars: 'Bars',
-  wave: 'Wave',
-  poster: 'Poster',
-  image: 'Image animation',
-  bloom: 'Bloom',
-  orb: 'Orb',
-  chrome: 'Chrome',
-}
+import { useVisualSession } from './visualSession.jsx'
 
 function Check({ checked, onChange, label, disabled }) {
   return (
@@ -70,6 +58,7 @@ function Artwork({ aspect, spec }) {
 
 export function Export() {
   const { track, studio } = useTrack()
+  const { saveNow } = useVisualSession()
   const [profile, setProfile] = useState(track?.profile || null)
   const [loopOn, setLoopOn] = useState(true)
   const [coverOn, setCoverOn] = useState(true)
@@ -118,7 +107,6 @@ export function Export() {
   const bounds = section && track ? lengthBounds(section.start, track.duration) : { min: 3, max: 8 }
   const loopLength = Math.min(bounds.max, Math.max(bounds.min, length))
   const selectedCount = Number(loopOn) + Number(coverOn) + Number(filmOn)
-  const styleLabel = STYLE_LABELS[studio.style] || 'Liquid'
 
   const loopSpec = useMemo(() => {
     if (!track || !section) return null
@@ -200,7 +188,9 @@ export function Export() {
         for (const file of files) packed.push({ name: file.name, bytes: new Uint8Array(await file.blob.arrayBuffer()) })
         saveBlob(zipFiles(packed), `${base}-halftone.zip`)
       }
-      saveVisual({ fileName: track.fileName, style: styleLabel })
+      await saveNow({
+        view: { format: studio.format || '16:9', playhead: 0 },
+      })
       setJob(null)
     } catch (caught) {
       if (controller.signal.aborted || caught instanceof ExportCancelled) {

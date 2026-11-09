@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { SHORT_TRACK_MESSAGE, analyzeTrack } from './analyzeTrack.js'
 import { RIGHTS_NOTE } from './screens.jsx'
 import { useTrack } from './track.jsx'
+import { useVisualSession } from './visualSession.jsx'
 
 function sectionStyle(section, duration) {
   const center = ((section.start + section.end) / 2 / duration) * 100
@@ -30,6 +31,7 @@ function PauseIcon() {
 
 export function Upload() {
   const { track, setTrack } = useTrack()
+  const { beginNewVisual } = useVisualSession()
   const inputRef = useRef(null)
   const audioRef = useRef(null)
   const [dragging, setDragging] = useState(false)
@@ -104,6 +106,7 @@ export function Upload() {
     setStatus('loading')
     try {
       const analysis = await analyzeTrack(file)
+      beginNewVisual()
       setTrack({ ...analysis, file })
       setStatus('ready')
     } catch (caught) {
