@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { previewIsStale, refreshStalePreview } from './previewCapture.js'
 import { useVisualSession } from './visualSession.jsx'
 import {
   deleteVisual,
@@ -184,6 +185,24 @@ export function MyVisuals() {
     load()
     return onVisualsChange(load)
   }, [])
+
+  useEffect(() => {
+    let cancel = false
+    async function refresh() {
+      for (const item of items) {
+        if (cancel || !previewIsStale(item)) continue
+        try {
+          await refreshStalePreview(item.id)
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    refresh()
+    return () => {
+      cancel = true
+    }
+  }, [items])
 
   useEffect(
     () => () => {

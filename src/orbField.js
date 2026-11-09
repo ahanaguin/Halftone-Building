@@ -549,10 +549,12 @@ export function paintOrb(ctx, spec) {
   const colors = orbDotColorsOf(edit).map((hex) => visibleInk(hex, background))
   const ripples = ripplesAt(spec, time, seed, tempo, quiet)
   const transform = typeof ctx.getTransform === 'function' ? ctx.getTransform() : { a: 1, d: 1, e: 0, f: 0 }
-  const sx = Math.max(1, transform.a || 1)
-  const sy = Math.max(1, transform.d || 1)
-  const drawW = Math.max(1, Math.round(width * sx))
-  const drawH = Math.max(1, Math.round(height * sy))
+  const sx = Math.abs(transform.a) || 1
+  const sy = Math.abs(transform.d) || 1
+  const destW = Math.max(1, Math.round(width * sx))
+  const destH = Math.max(1, Math.round(height * sy))
+  const drawW = Math.max(destW, Math.round(width))
+  const drawH = Math.max(destH, Math.round(height))
 
   setGeometry(count, ring)
   const uniforms = material.uniforms
@@ -565,7 +567,7 @@ export function paintOrb(ctx, spec) {
   uniforms.uSpin.value = spin
   uniforms.uScale.value = 0.84 * scale
   uniforms.uBreathe.value = breathe
-  uniforms.uPointSize.value = pointSize * sx
+  uniforms.uPointSize.value = pointSize * (drawW / width)
   uniforms.uHigh.value = quiet ? high * 0.25 : high
   uniforms.uSeed.value = (seed % 1024) / 1024
   uniforms.uColorCount.value = colors.length
@@ -597,6 +599,6 @@ export function paintOrb(ctx, spec) {
   renderer.render(scene, camera)
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.drawImage(renderer.domElement, transform.e || 0, transform.f || 0, drawW, drawH)
+  ctx.drawImage(renderer.domElement, transform.e || 0, transform.f || 0, destW, destH)
   ctx.restore()
 }

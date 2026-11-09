@@ -1,29 +1,10 @@
 import { createContext, useContext, useMemo, useRef, useState } from 'react'
-import { loadCalibration, paletteFromCalibration } from './calibrate.js'
-import { paletteForSection, paletteFromPreset } from './palette.js'
+import { studioFromCalibration } from './calibrate.js'
 
 const TrackContext = createContext(null)
 
 function initialStudio() {
-  const saved = loadCalibration()
-  if (saved?.groups) {
-    return {
-      style: 'shapes',
-      roundness: saved.roundness ?? 0.7,
-      seeds: {},
-      palette: paletteFromCalibration(saved),
-      calibration: saved,
-      shine: true,
-    }
-  }
-  return {
-    style: 'shapes',
-    roundness: 0.7,
-    seeds: {},
-    palette: paletteFromPreset(paletteForSection('Quiet')),
-    calibration: null,
-    shine: true,
-  }
+  return studioFromCalibration()
 }
 
 export function TrackProvider({ children }) {

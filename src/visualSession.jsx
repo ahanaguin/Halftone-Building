@@ -1,10 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { studioFromCalibration } from './calibrate.js'
 import { captureStills } from './previewCapture.js'
 import { useTrack } from './track.jsx'
 import {
   buildLibraryRecord,
   buildProjectRecord,
   fingerprintOf,
+  PREVIEW_VERSION,
   getLibraryItem,
   getProject,
   hydrateImages,
@@ -52,7 +54,8 @@ export function VisualSessionProvider({ children }) {
     setVisualId(null)
     setVisualName('')
     setStatus('idle')
-  }, [])
+    replaceStudio(studioFromCalibration())
+  }, [replaceStudio])
 
   const saveNow = useCallback((extra = {}) => {
     const run = async () => {
@@ -71,13 +74,16 @@ export function VisualSessionProvider({ children }) {
       const id = visualIdRef.current || crypto.randomUUID()
       const name = visualNameRef.current || currentTrack.fileName || 'Untitled'
       if (visualIdRef.current && fingerprint === fingerprintRef.current) {
-        const project = await getProject(id).catch(() => null)
-        if (project) {
-          project.view = view
-          if (project.track) project.track.playhead = view.playhead
-          await putProject(project)
+        const existing = await getLibraryItem(id).catch(() => null)
+        if (existing?.previewVersion === PREVIEW_VERSION && existing.thumbnail && existing.preview) {
+          const project = await getProject(id).catch(() => null)
+          if (project) {
+            project.view = view
+            if (project.track) project.track.playhead = view.playhead
+            await putProject(project)
+          }
+          return id
         }
-        return id
       }
       setStatus('saving')
       abortRef.current?.abort()

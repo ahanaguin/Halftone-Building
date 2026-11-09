@@ -174,16 +174,7 @@ export function Landing() {
 
 export { PickStyle } from './StylePicker.jsx'
 
-export function MyPalette() {
-  return (
-    <main className="screen">
-      <div className="screen-inner">
-        <h1>My palette</h1>
-        <p className="lede">Saved colors will show up here.</p>
-      </div>
-    </main>
-  )
-}
+export { MyPalette } from './MyPalette.jsx'
 
 export function HowItWorks() {
   return (

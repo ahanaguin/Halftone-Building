@@ -794,10 +794,12 @@ export function paintChrome(ctx, spec) {
   uniforms.uC2.value.copy(hexToVec(colors[2] || colors[0] || DEFAULT_CHROME_COLORS[2]))
 
   const transform = typeof ctx.getTransform === 'function' ? ctx.getTransform() : { a: 1, d: 1, e: 0, f: 0 }
-  const sx = Math.max(1, transform.a || 1)
-  const sy = Math.max(1, transform.d || 1)
-  const drawW = Math.max(1, Math.round(width * sx))
-  const drawH = Math.max(1, Math.round(height * sy))
+  const sx = Math.abs(transform.a) || 1
+  const sy = Math.abs(transform.d) || 1
+  const destW = Math.max(1, Math.round(width * sx))
+  const destH = Math.max(1, Math.round(height * sy))
+  const drawW = Math.max(destW, Math.round(width))
+  const drawH = Math.max(destH, Math.round(height))
   const [marchW, marchH] = marchSize(drawW, drawH, spec)
   const exportPass = spec.exportPass === true
   const playing = spec.playing === true
@@ -812,7 +814,7 @@ export function paintChrome(ctx, spec) {
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(renderer.domElement, transform.e || 0, transform.f || 0, drawW, drawH)
+  ctx.drawImage(renderer.domElement, transform.e || 0, transform.f || 0, destW, destH)
   ctx.restore()
   if (playing && typeof performance !== 'undefined') {
     paintEma = paintEma * 0.82 + (performance.now() - started) * 0.18

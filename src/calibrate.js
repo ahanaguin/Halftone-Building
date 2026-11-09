@@ -1,8 +1,23 @@
-import { swatchFromHex } from './palette.js'
+import { CALM_PALETTE, paletteForSection, paletteFromPreset, swatchFromHex } from './palette.js'
 
 export const STORAGE_KEY = 'halftone.calibration'
 
 export const CALIBRATION_COLORS = ['#e24a3b', '#e06a3a', '#e6a33a', '#e4d23a', '#3cba62', '#2eb5a8', '#3a96d6']
+
+export const DEFAULT_GROUPS = {
+  low: CALM_PALETTE.colors[0],
+  mid: CALM_PALETTE.colors[1],
+  high: CALM_PALETTE.colors[1],
+  major: CALM_PALETTE.colors[0],
+  minor: CALM_PALETTE.colors[2],
+}
+
+export const ROLE_SWATCHES = [
+  { key: 'low', label: 'Low sounds', hint: 'Big, low shapes', soundId: '01-pitch-low' },
+  { key: 'high', label: 'High sounds', hint: 'Small accents', soundId: '03-pitch-high' },
+  { key: 'major', label: 'Bright, major sounds', hint: 'Energetic sections', soundId: '06-major-chord' },
+  { key: 'minor', label: 'Dark, minor sounds', hint: 'Calm sections', soundId: '07-minor-chord' },
+]
 
 const SHAPE_SCORE = { round: 1, between: 0.5, spiky: 0 }
 
@@ -26,6 +41,8 @@ function repeat(id) {
   const sound = SOUNDS.find((item) => item.id === id)
   return { ...sound, id: `${id}-repeat`, repeatOf: id }
 }
+
+export const CALIBRATION_SOUNDS = SOUNDS
 
 export const SEQUENCE = [...SOUNDS, repeat('07-minor-chord'), repeat('11-rain')]
 
@@ -96,6 +113,47 @@ export function resultFromAnswers(answers, references) {
         repeat: rainRepeat,
       },
     },
+  }
+}
+
+export function filledGroups(saved) {
+  const groups = { ...DEFAULT_GROUPS, ...(saved?.groups || {}) }
+  return groups
+}
+
+export function fillCalibration(result, previous) {
+  const groups = {
+    ...DEFAULT_GROUPS,
+    ...(previous?.groups || {}),
+    ...Object.fromEntries(Object.entries(result.groups || {}).filter(([, color]) => color)),
+  }
+  return {
+    ...result,
+    skipped: false,
+    groups,
+    roundness: result.roundness ?? previous?.roundness ?? 0.7,
+  }
+}
+
+export function studioFromCalibration(saved) {
+  const data = saved === undefined ? loadCalibration() : saved
+  if (data?.groups && !data.skipped) {
+    return {
+      style: 'shapes',
+      roundness: data.roundness ?? 0.7,
+      seeds: {},
+      palette: paletteFromCalibration({ ...data, groups: filledGroups(data) }),
+      calibration: data,
+      shine: true,
+    }
+  }
+  return {
+    style: 'shapes',
+    roundness: 0.7,
+    seeds: {},
+    palette: paletteFromPreset(paletteForSection('Quiet')),
+    calibration: data,
+    shine: true,
   }
 }
 

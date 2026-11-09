@@ -7,6 +7,8 @@ const LIBRARY = 'library'
 const PROJECTS = 'projects'
 const CHANGED = 'halftone:visuals'
 
+export const PREVIEW_VERSION = 5
+
 export const STYLE_LABELS = {
   shapes: 'Liquid',
   halftone: 'Halftone',
@@ -272,6 +274,7 @@ export function buildLibraryRecord({ id, name, track, studio, createdAt, thumbna
     updatedAt: Date.now(),
     thumbnail: thumbnail || null,
     preview: preview || null,
+    previewVersion: PREVIEW_VERSION,
     fingerprint: fingerprint || '',
   }
 }

@@ -12,6 +12,7 @@ import {
   saveCalibration,
   soundSrc,
 } from './calibrate.js'
+import { replacePaletteImages } from './paletteImages.js'
 import { StepIntro } from './StepIntro.jsx'
 import { hasSeenIntro, shouldShowStepIntro } from './stepIntro.js'
 import { useTrack } from './track.jsx'
@@ -179,6 +180,7 @@ export function Calibrate() {
     const keptReferences = references.filter((color) => !dismissed.some((item) => sameColor(item, color)))
     const result = resultFromAnswers(nextAnswers, keptReferences)
     saveCalibration(result)
+    if (images.length) replacePaletteImages(images).catch(() => {})
     replaceStudio({
       style: 'shapes',
       roundness: result.roundness,
