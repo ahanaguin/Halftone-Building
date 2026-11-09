@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { hasCalibration } from './calibrate.js'
 import { beginIntroFlow } from './stepIntro.js'
@@ -179,11 +179,92 @@ export { MyPalette } from './MyPalette.jsx'
 export { HowItWorks } from './HowItWorks.jsx'
 
 export function SendFeedback() {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [message, setMessage] = useState('')
+  const [status, setStatus] = useState('idle')
+
+  async function onSubmit(event) {
+    event.preventDefault()
+    const feedback = message.trim()
+    if (!feedback || status === 'sending') return
+    setStatus('sending')
+    try {
+      const response = await fetch('https://formsubmit.co/ajax/ahana.guin@gmail.com', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          _subject: 'Halftone feedback',
+          _template: 'box',
+          name: name.trim() || 'Anonymous',
+          email: email.trim() || 'not provided',
+          message: feedback,
+        }),
+      })
+      if (!response.ok) throw new Error('send failed')
+      setStatus('sent')
+      setName('')
+      setEmail('')
+      setMessage('')
+    } catch {
+      setStatus('error')
+    }
+  }
+
   return (
-    <main className="screen">
-      <div className="screen-inner">
+    <main className="screen-feedback">
+      <div className="screen-feedback-inner">
         <h1>Send feedback</h1>
         <p className="lede">Share what would make this better.</p>
+        {status === 'sent' ? (
+          <p className="feedback-thanks">Thanks — your note is in.</p>
+        ) : (
+          <form className="feedback-form" onSubmit={onSubmit}>
+            <label>
+              <span>Your feedback</span>
+              <textarea
+                name="message"
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                required
+                rows={7}
+              />
+            </label>
+            <label>
+              <span>
+                Name <em>optional</em>
+              </span>
+              <input
+                type="text"
+                name="name"
+                autoComplete="name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>
+                Email <em>optional</em>
+              </span>
+              <input
+                type="email"
+                name="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+            {status === 'error' ? (
+              <p className="feedback-error">Couldn't send just now. Try again in a moment.</p>
+            ) : null}
+            <button className="button" type="submit" disabled={status === 'sending' || !message.trim()}>
+              {status === 'sending' ? 'Sending' : 'Send'}
+            </button>
+          </form>
+        )}
       </div>
     </main>
   )

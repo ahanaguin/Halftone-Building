@@ -123,7 +123,7 @@ export function Shell() {
       </aside>
 
       <div className="app-main">
-        <header className="topbar">
+        <header className={open ? 'topbar topbar-drawer' : 'topbar'}>
           <div className="topbar-brand">
             {open ? null : (
               <button

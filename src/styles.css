@@ -6,6 +6,9 @@
   --panel: #121212;
   --line: #2a2a28;
   --font: "SF Pro Text", "SF Pro", -apple-system, BlinkMacSystemFont, sans-serif;
+  --page-gutter: 56px;
+  --page-max: 1280px;
+  --menu-size: 40px;
 }
 
 @font-face {
@@ -22,6 +25,14 @@
   font-weight: 500;
   font-display: swap;
   src: local("SF Pro Text Medium"), local("SFProText-Medium");
+}
+
+@font-face {
+  font-family: "SF Pro Display";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: local("SF Pro Display Semibold"), local("SFProDisplay-Semibold");
 }
 
 @font-face {
@@ -124,8 +135,10 @@ a {
 }
 
 .topbar-logo {
-  display: flex;
-  align-items: center;
+  display: block;
+  overflow: hidden;
+  width: calc(132px * 1690 / 2172);
+  height: calc(132px * 153 / 2172);
   line-height: 0;
   text-decoration: none;
 }
@@ -134,6 +147,8 @@ a {
   display: block;
   width: 132px;
   height: auto;
+  margin-top: calc(132px * -284 / 2172);
+  margin-left: calc(132px * -239 / 2172);
   mix-blend-mode: lighten;
 }
 
@@ -173,21 +188,21 @@ a {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 36px 40px 28px;
+  padding: 36px var(--page-gutter) 28px;
 }
 
 .upload-inner {
   display: flex;
   flex: 1;
   flex-direction: column;
-  width: min(1040px, 100%);
+  width: min(var(--page-max), 100%);
   margin: 0 auto;
 }
 
 .upload h1 {
-  font-size: 32px;
-  font-weight: 500;
-  letter-spacing: -0.03em;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .drop {
@@ -456,9 +471,12 @@ a {
   flex-direction: column;
   min-width: 0;
   min-height: 100vh;
+  container-type: inline-size;
 }
 
 .topbar {
+  --content-left: max(var(--page-gutter), calc((100cqw - var(--page-max)) / 2));
+  --topbar-gap: max(8px, calc((var(--content-left) - var(--menu-size)) / 2));
   position: sticky;
   top: 0;
   z-index: 10;
@@ -467,15 +485,19 @@ a {
   align-items: center;
   justify-content: space-between;
   height: 72px;
-  padding: 0 28px;
+  padding: 0 var(--content-left) 0 var(--topbar-gap);
   background: var(--bg);
   border-bottom: 1px solid var(--line);
+}
+
+.topbar-drawer {
+  padding-left: var(--content-left);
 }
 
 .topbar-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--topbar-gap);
   min-width: 0;
 }
 
@@ -543,9 +565,9 @@ a {
 h1 {
   margin: 0;
   font-family: "SF Pro Display", "SF Pro Text", "SF Pro", -apple-system, sans-serif;
-  font-size: 44px;
-  font-weight: 500;
-  letter-spacing: -0.04em;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 1.05;
 }
 
@@ -568,7 +590,7 @@ h1 {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  padding: 36px 56px 40px;
+  padding: 36px var(--page-gutter) 40px;
 }
 
 .screen-styles-inner {
@@ -576,12 +598,13 @@ h1 {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  width: min(1280px, 100%);
+  width: min(var(--page-max), 100%);
   margin: 0 auto;
 }
 
 .screen-styles h1 {
-  font-size: 36px;
+  font-size: 28px;
+  font-weight: 600;
 }
 
 .screen-styles .lede {
@@ -887,8 +910,11 @@ h1 {
   max-width: calc(50vw - 96px);
   margin: 0;
   color: var(--text);
-  font-size: 22px;
-  line-height: 1.35;
+  font-family: "SF Pro Display", "SF Pro Text", "SF Pro", -apple-system, sans-serif;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.22;
   text-align: left;
 }
 
@@ -2022,6 +2048,7 @@ button.swatch {
 .calibrate {
   flex: 1;
   min-height: 0;
+  padding: 0 var(--page-gutter);
 }
 
 .calibrate audio,
@@ -2173,9 +2200,9 @@ button.swatch {
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 56px;
   align-items: start;
-  width: min(1100px, 100%);
+  width: min(var(--page-max), 100%);
   margin: 0 auto;
-  padding: 54px 40px 48px;
+  padding: 54px 0 48px;
 }
 
 .cal-head {
@@ -2206,9 +2233,9 @@ button.swatch {
 
 .cal-head h1 {
   margin: 0;
-  font-size: 34px;
-  font-weight: 500;
-  letter-spacing: -0.03em;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .cal-head p {
@@ -2503,21 +2530,21 @@ button.swatch {
 .export {
   flex: 1;
   min-height: 0;
-  padding: 36px 40px 32px;
+  padding: 36px var(--page-gutter) 32px;
 }
 
 .export-inner,
 .export-empty {
-  width: min(1180px, 100%);
+  width: min(var(--page-max), 100%);
   margin: 0 auto;
 }
 
 .export h1,
 .export-empty h1 {
   margin: 0;
-  font-size: 40px;
-  font-weight: 500;
-  letter-spacing: -0.03em;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .export-lede,
@@ -2757,7 +2784,7 @@ button.swatch {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  padding: 36px 56px 40px;
+  padding: 36px var(--page-gutter) 40px;
   overflow: auto;
 }
 
@@ -2766,12 +2793,13 @@ button.swatch {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  width: min(1280px, 100%);
+  width: min(var(--page-max), 100%);
   margin: 0 auto;
 }
 
 .screen-library h1 {
-  font-size: 36px;
+  font-size: 28px;
+  font-weight: 600;
 }
 
 .screen-library .lede {
@@ -3451,6 +3479,16 @@ button.swatch {
   width: min(560px, 100%);
 }
 
+.palette-editor .cal-groups {
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.palette-editor .cal-groups .cal-label {
+  margin-top: 0;
+}
+
 .palette-editor-head {
   display: flex;
   align-items: center;
@@ -3501,26 +3539,27 @@ button.swatch {
   flex-direction: column;
   min-height: 0;
   overflow: auto;
-  padding: 36px 32px 80px;
+  padding: 36px var(--page-gutter) 80px;
 }
 
 .screen-guide-inner {
-  width: min(760px, 100%);
+  width: min(var(--page-max), 100%);
   margin: 0 auto;
 }
 
 .screen-guide h1 {
-  font-size: 44px;
+  font-size: 28px;
+  font-weight: 600;
 }
 
 .screen-guide .lede {
-  max-width: 46ch;
-  font-size: 17px;
-  line-height: 1.45;
+  max-width: 62ch;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .guide-intro {
-  margin-bottom: 48px;
+  margin-bottom: 36px;
 }
 
 .guide-steps {
@@ -3531,7 +3570,7 @@ button.swatch {
 
 .guide-step {
   display: grid;
-  gap: 18px;
+  gap: 16px;
   margin: 0;
   padding: 28px 0;
   border-top: 1px solid var(--line);
@@ -3541,20 +3580,20 @@ button.swatch {
   overflow: hidden;
   border-radius: 18px;
   background: #121212;
+  line-height: 0;
 }
 
 .guide-step-copy h2 {
   margin: 4px 0 0;
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 500;
-  letter-spacing: -0.03em;
 }
 
 .guide-step-copy p {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 16px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .guide-step-num {
@@ -3563,25 +3602,24 @@ button.swatch {
   font-size: 13px;
 }
 
+.guide-shot {
+  margin: 0;
+}
+
+.guide-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  object-position: top left;
+  image-rendering: auto;
+}
+
 .guide-still {
   display: grid;
   place-items: center;
   min-height: 240px;
   background: #121212;
-}
-
-.guide-still video,
-.guide-still img,
-.guide-still svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.guide-still video {
-  max-height: 280px;
-  object-fit: contain;
-  background: #111;
 }
 
 .guide-still-calibrate {
@@ -3632,90 +3670,22 @@ button.swatch {
 }
 
 .guide-pills span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 36px;
-  padding: 8px 14px;
+  padding: 0 14px;
   border: 1px solid #3a3a36;
   border-radius: 999px;
   color: var(--text);
   font-size: 14px;
+  line-height: 1;
 }
 
 .guide-pills .is-on {
   border-color: #fff;
   background: #fff;
   color: #111;
-}
-
-.guide-still-upload {
-  padding: 12px 8px 0;
-}
-
-.guide-style-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  min-height: 280px;
-  background: #000;
-}
-
-.guide-style-grid video {
-  display: block;
-  width: 100%;
-  height: 140px;
-  object-fit: cover;
-}
-
-.guide-export {
-  display: flex;
-  align-items: end;
-  justify-content: center;
-  gap: 18px;
-  min-height: 260px;
-  padding: 28px 20px 22px;
-}
-
-.guide-frame {
-  margin: 0;
-}
-
-.guide-frame img {
-  display: block;
-  width: 100%;
-  overflow: hidden;
-  border-radius: 12px;
-  object-fit: cover;
-  background: #000;
-}
-
-.guide-frame figcaption {
-  padding: 8px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
-}
-
-.guide-frame.is-tall {
-  width: 86px;
-}
-
-.guide-frame.is-tall img {
-  height: 154px;
-}
-
-.guide-frame.is-square {
-  width: 112px;
-}
-
-.guide-frame.is-square img {
-  height: 112px;
-}
-
-.guide-frame.is-wide {
-  width: 168px;
-}
-
-.guide-frame.is-wide img {
-  height: 94px;
 }
 
 .guide-section {
@@ -3726,9 +3696,8 @@ button.swatch {
 
 .guide-section h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 500;
-  letter-spacing: -0.03em;
 }
 
 .guide-section h3 {
@@ -3739,38 +3708,21 @@ button.swatch {
 
 .guide-section p {
   margin: 12px 0 0;
+  max-width: 62ch;
   color: var(--muted);
-  font-size: 16px;
-  line-height: 1.55;
-}
-
-.guide-hearing {
-  margin: 20px 0 0;
-}
-
-.guide-hearing svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 16px;
-}
-
-.guide-hearing figcaption {
-  margin: 12px 0 0;
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .guide-glossary {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 16px 28px;
   margin: 16px 0 0;
 }
 
 .guide-glossary dt {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -3778,7 +3730,7 @@ button.swatch {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 .guide-faq {
@@ -3800,7 +3752,7 @@ button.swatch {
   gap: 16px;
   padding: 16px 0;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 500;
   list-style: none;
 }
@@ -3827,13 +3779,13 @@ button.swatch {
 
 .guide-faq details p {
   margin: 0 0 16px;
-  max-width: 46ch;
+  max-width: 62ch;
 }
 
 .guide-footer {
   margin: 36px 0 0;
   color: var(--muted);
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .guide-footer a {
@@ -3846,7 +3798,97 @@ button.swatch {
   color: #fff;
 }
 
-.guide-hearing svg text,
-.guide-still-upload svg text {
-  font-family: var(--font);
+.screen-feedback {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: 36px var(--page-gutter) 80px;
+}
+
+.screen-feedback-inner {
+  width: min(var(--page-max), 100%);
+  margin: 0 auto;
+}
+
+.screen-feedback-inner .feedback-form,
+.screen-feedback-inner .feedback-thanks {
+  max-width: 560px;
+}
+
+.screen-feedback h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.screen-feedback .lede {
+  max-width: none;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.feedback-form {
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.feedback-form label {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.feedback-form label em {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.feedback-form input,
+.feedback-form textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #121212;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.feedback-form textarea {
+  min-height: 160px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.feedback-form input:focus,
+.feedback-form textarea:focus {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.feedback-form .button {
+  justify-self: start;
+  margin-top: 6px;
+}
+
+.feedback-thanks,
+.feedback-error {
+  margin: 28px 0 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.feedback-thanks {
+  color: var(--text);
+}
+
+.feedback-error {
+  margin: 0;
+  color: #e24a3b;
 }
