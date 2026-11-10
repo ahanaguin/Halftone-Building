@@ -3,117 +3,183 @@ import { Link } from 'react-router-dom'
 import { hasCalibration } from './calibrate.js'
 import { beginIntroFlow } from './stepIntro.js'
 import { useVisualSession } from './visualSession.jsx'
-import { Wordmark } from './Wordmark.jsx'
 
-function LandingAura() {
+function PlayIcon() {
   return (
-    <div className="landing-aura" aria-hidden="true">
-      <span className="landing-wash landing-wash-a" />
-      <span className="landing-wash landing-wash-b" />
-      <span className="landing-wash landing-wash-c" />
-      <span className="landing-wash landing-wash-d" />
-    </div>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
+    </svg>
   )
 }
 
-function LandingTrail() {
-  const ref = useRef(null)
+function PauseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function VolumeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M4 9.5h3.2L11 6.2v11.6L7.2 14.5H4zM14.2 8.4a4.2 4.2 0 0 1 0 7.2M16.8 6.2a7.2 7.2 0 0 1 0 11.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function MuteIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M4 9.5h3.2L11 6.2v11.6L7.2 14.5H4zM16 9l5 6M21 9l-5 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function LandingPlayer() {
+  const videoRef = useRef(null)
+  const dragging = useRef(false)
+  const [playing, setPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [volume, setVolume] = useState(0.8)
+  const [muted, setMuted] = useState(false)
 
   useEffect(() => {
-    const canvas = ref.current
-    const hero = canvas?.parentElement
-    if (!canvas || !hero) return
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const video = videoRef.current
+    if (!video) return undefined
+    video.muted = muted
+    video.volume = volume
+    return undefined
+  }, [muted, volume])
 
-    const ctx = canvas.getContext('2d')
-    const dpr = Math.min(2, window.devicePixelRatio || 1)
-    let width = 0
-    let height = 0
-    let gap = 20
-    let cols = 0
-    let rows = 0
-    let ox = 0
-    let oy = 0
-    let cursor = null
-    let raf = 0
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return undefined
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
 
-    function resize() {
-      const rect = hero.getBoundingClientRect()
-      width = rect.width
-      height = rect.height
-      canvas.width = Math.max(1, Math.round(width * dpr))
-      canvas.height = Math.max(1, Math.round(height * dpr))
-      canvas.style.width = `${width}px`
-      canvas.style.height = `${height}px`
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      gap = Math.round(Math.max(16, Math.min(20, width / 80)))
-      ox = gap * 0.5
-      oy = gap * 0.5
-      cols = Math.floor((width - ox) / gap) + 1
-      rows = Math.floor((height - oy) / gap) + 1
-      paint()
+    function tryPlay() {
+      const play = video.play()
+      if (!play) return
+      play.catch(() => {
+        video.muted = true
+        setMuted(true)
+        video.play().catch(() => {})
+      })
     }
 
-    function point(event) {
-      const rect = hero.getBoundingClientRect()
-      return { x: event.clientX - rect.left, y: event.clientY - rect.top }
-    }
-
-    function paint() {
-      raf = 0
-      ctx.clearRect(0, 0, width, height)
-      if (!cursor) return
-      const reach = gap * 3.2
-      const reach2 = reach * reach
-      const c0 = Math.max(0, Math.floor((cursor.x - ox - reach) / gap))
-      const c1 = Math.min(cols - 1, Math.ceil((cursor.x - ox + reach) / gap))
-      const r0 = Math.max(0, Math.floor((cursor.y - oy - reach) / gap))
-      const r1 = Math.min(rows - 1, Math.ceil((cursor.y - oy + reach) / gap))
-      ctx.fillStyle = '#fff'
-      const radius = gap * 0.15
-      for (let row = r0; row <= r1; row += 1) {
-        for (let col = c0; col <= c1; col += 1) {
-          const dx = ox + col * gap - cursor.x
-          const dy = oy + row * gap - cursor.y
-          const dist2 = dx * dx + dy * dy
-          if (dist2 > reach2) continue
-          const fall = 1 - Math.sqrt(dist2) / reach
-          const strength = fall * fall
-          if (strength < 0.04) continue
-          ctx.globalAlpha = 0.12 + strength * 0.88
-          ctx.beginPath()
-          ctx.arc(ox + col * gap, oy + row * gap, radius, 0, Math.PI * 2)
-          ctx.fill()
-        }
-      }
-      ctx.globalAlpha = 1
-    }
-
-    function onMove(event) {
-      cursor = point(event)
-      if (!raf) raf = requestAnimationFrame(paint)
-    }
-
-    function onLeave() {
-      cursor = null
-      if (!raf) raf = requestAnimationFrame(paint)
-    }
-
-    const observer = new ResizeObserver(resize)
-    observer.observe(hero)
-    resize()
-    hero.addEventListener('pointermove', onMove)
-    hero.addEventListener('pointerleave', onLeave)
-
-    return () => {
-      observer.disconnect()
-      hero.removeEventListener('pointermove', onMove)
-      hero.removeEventListener('pointerleave', onLeave)
-      if (raf) cancelAnimationFrame(raf)
-    }
+    if (video.readyState >= 2) tryPlay()
+    else video.addEventListener('canplay', tryPlay, { once: true })
+    return () => video.removeEventListener('canplay', tryPlay)
   }, [])
 
-  return <canvas ref={ref} className="landing-trail" aria-hidden="true" />
+  function togglePlay() {
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) video.play().catch(() => {})
+    else video.pause()
+  }
+
+  function seek(next) {
+    const video = videoRef.current
+    if (!video || !video.duration) return
+    video.currentTime = next * video.duration
+    setProgress(next)
+  }
+
+  return (
+    <div className="landing-player">
+      <div className="landing-stage">
+        <video
+          ref={videoRef}
+          src="/Halftone-ad.mp4?v=2"
+          playsInline
+          loop
+          autoPlay
+          preload="auto"
+          onClick={togglePlay}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onTimeUpdate={() => {
+            const video = videoRef.current
+            if (!video || dragging.current || !video.duration) return
+            setProgress(video.currentTime / video.duration)
+          }}
+        />
+      </div>
+      <div className="landing-controls">
+        <button
+          type="button"
+          className="landing-control-btn"
+          aria-label={playing ? 'Pause' : 'Play'}
+          onClick={togglePlay}
+        >
+          {playing ? <PauseIcon /> : <PlayIcon />}
+        </button>
+        <input
+          className="landing-slider landing-seek"
+          type="range"
+          min="0"
+          max="1"
+          step="0.001"
+          value={progress}
+          aria-label="Video position"
+          style={{ '--pct': `${progress * 100}%` }}
+          onPointerDown={(event) => {
+            dragging.current = true
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }}
+          onPointerUp={() => {
+            dragging.current = false
+          }}
+          onChange={(event) => seek(Number(event.target.value))}
+        />
+        <button
+          type="button"
+          className="landing-control-btn"
+          aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
+          onClick={() => {
+            if (muted || volume === 0) {
+              setMuted(false)
+              if (volume === 0) setVolume(0.8)
+            } else {
+              setMuted(true)
+            }
+          }}
+        >
+          {muted || volume === 0 ? <MuteIcon /> : <VolumeIcon />}
+        </button>
+        <input
+          className="landing-slider landing-volume"
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={muted ? 0 : volume}
+          aria-label="Volume"
+          style={{ '--pct': `${(muted ? 0 : volume) * 100}%` }}
+          onChange={(event) => {
+            const next = Number(event.target.value)
+            setVolume(next)
+            setMuted(next === 0)
+          }}
+        />
+      </div>
+    </div>
+  )
 }
 
 function Screen({ title, lede, action, to, back, backTo }) {
@@ -138,18 +204,16 @@ function Screen({ title, lede, action, to, back, backTo }) {
 }
 
 export const RIGHTS_NOTE =
-  "Only upload music and images you own or have permission to use. You're responsible for what you create and share with Halftone."
+  "Only upload music and images you own or have permission to use. You're responsible for what you create and share."
 
 export function Landing() {
   const { beginNewVisual } = useVisualSession()
   return (
     <main className="screen-landing">
-      <section className="landing-hero">
-        <LandingAura />
-        <LandingTrail />
-        <h1 className="wordmark-title">
-          <Wordmark />
-        </h1>
+      <section className="landing-show">
+        <LandingPlayer />
+      </section>
+      <section className="landing-copy">
         <Link
           className="button landing-start"
           to={hasCalibration() ? '/upload' : '/calibrate'}
@@ -160,8 +224,6 @@ export function Landing() {
         >
           Start now
         </Link>
-      </section>
-      <section className="landing-copy">
         <p className="landing-note">
           Halftone is a free tool for independent musicians. We help turn your songs into animated visualizers, Spotify
           Canvas loops, and cover art, with colors and styles you choose.

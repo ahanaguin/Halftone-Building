@@ -9,6 +9,7 @@
   --page-gutter: 56px;
   --page-max: 1280px;
   --menu-size: 40px;
+  --chrome-gutter: 24px;
 }
 
 @font-face {
@@ -474,9 +475,12 @@ a {
   container-type: inline-size;
 }
 
-.topbar {
+.app-main > * {
   --content-left: max(var(--page-gutter), calc((100cqw - var(--page-max)) / 2));
   --topbar-gap: max(8px, calc((var(--content-left) - var(--menu-size)) / 2));
+}
+
+.topbar {
   position: sticky;
   top: 0;
   z-index: 10;
@@ -485,7 +489,7 @@ a {
   align-items: center;
   justify-content: space-between;
   height: 72px;
-  padding: 0 var(--content-left) 0 var(--topbar-gap);
+  padding: 0 var(--chrome-gutter) 0 var(--topbar-gap);
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
@@ -716,138 +720,123 @@ h1 {
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  overflow: auto;
   padding: 0;
 }
 
-.landing-hero {
-  position: relative;
-  display: flex;
+.landing-show {
   flex: 1 1 auto;
+  min-height: 0;
+  padding: 20px var(--chrome-gutter) 0;
+}
+
+.landing-player {
+  display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 340px;
-  padding-top: 52px;
+  min-height: 0;
+}
+
+.landing-stage {
   overflow: hidden;
-  isolation: isolate;
+  width: min(100%, 960px);
+  margin-inline: auto;
+  border-radius: 28px;
+  background: #000;
+  line-height: 0;
 }
 
-.landing-aura {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  background: #ff1fa8;
-  pointer-events: none;
-}
-
-.landing-wash {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  will-change: opacity;
-}
-
-.landing-wash-a {
-  background: #ff1fa8;
-  animation: landing-dissolve-a 28s ease-in-out infinite;
-}
-
-.landing-wash-b {
-  background: #7b2cff;
-  animation: landing-dissolve-b 28s ease-in-out infinite;
-}
-
-.landing-wash-c {
-  background: #265cff;
-  animation: landing-dissolve-c 28s ease-in-out infinite;
-}
-
-.landing-wash-d {
-  background: #ff2a6a;
-  animation: landing-dissolve-d 28s ease-in-out infinite;
-}
-
-@keyframes landing-dissolve-a {
-  0%,
-  18% {
-    opacity: 1;
-  }
-  25%,
-  93% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-@keyframes landing-dissolve-b {
-  0%,
-  18% {
-    opacity: 0;
-  }
-  25%,
-  43% {
-    opacity: 1;
-  }
-  50%,
-  100% {
-    opacity: 0;
-  }
-}
-
-@keyframes landing-dissolve-c {
-  0%,
-  43% {
-    opacity: 0;
-  }
-  50%,
-  68% {
-    opacity: 1;
-  }
-  75%,
-  100% {
-    opacity: 0;
-  }
-}
-
-@keyframes landing-dissolve-d {
-  0%,
-  68% {
-    opacity: 0;
-  }
-  75%,
-  93% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
-.landing-trail {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
+.landing-stage video {
   display: block;
   width: 100%;
-  height: 100%;
-  pointer-events: none;
+  height: auto;
+  aspect-ratio: 720 / 432;
+  object-fit: cover;
+  cursor: pointer;
 }
 
-.landing-hero .wordmark-title,
-.landing-hero .landing-start {
-  position: relative;
-  z-index: 2;
+.landing-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(560px, 100%);
+  margin: 22px auto 0;
+}
+
+.landing-control-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.landing-control-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.landing-control-btn:hover {
+  color: #fff;
+}
+
+.landing-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2px;
+  margin: 0;
+  border-radius: 999px;
+  background: linear-gradient(to right, #fff var(--pct, 0%), #3a3a36 var(--pct, 0%));
+  cursor: pointer;
+}
+
+.landing-seek {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.landing-volume {
+  flex: none;
+  width: 88px;
+}
+
+.landing-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px #000;
+  cursor: pointer;
+}
+
+.landing-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px #000;
+  cursor: pointer;
+}
+
+.landing-slider:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 4px;
 }
 
 .rights-note {
   width: 100%;
   margin: 36px 0 0;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.4;
   text-align: center;
   white-space: nowrap;
 }
@@ -865,33 +854,9 @@ h1 {
   max-width: calc(50vw - 96px);
 }
 
-.wordmark-title {
-  margin: 0;
-  font-size: 0;
-  line-height: 0;
-}
-
-.screen-landing .wordmark-title {
-  width: min(420px, 36vw);
-  aspect-ratio: 2172 / 151;
-  overflow: hidden;
-}
-
-.wordmark-title img {
-  display: block;
-  width: min(440px, 42vw);
-  height: auto;
-  mix-blend-mode: lighten;
-}
-
-.screen-landing .wordmark-title img {
-  width: 100%;
-  margin-top: calc(min(420px, 36vw) * -284 / 2172);
-}
-
 .landing-copy {
   flex: none;
-  padding: 64px 80px 56px;
+  padding: 40px var(--chrome-gutter) 56px var(--content-left);
   background: var(--bg);
   animation: landing-copy-in 1s ease 0.15s both;
 }
@@ -911,7 +876,7 @@ h1 {
   margin: 0;
   color: var(--text);
   font-family: "SF Pro Display", "SF Pro Text", "SF Pro", -apple-system, sans-serif;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.22;
@@ -919,31 +884,11 @@ h1 {
 }
 
 .landing-start {
-  margin-top: 28px;
-  background: #111;
-  color: #fff;
-  transition: background 180ms ease, box-shadow 180ms ease;
-}
-
-.landing-start:hover {
-  background: #000;
-  color: #fff;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.28),
-    0 0 16px rgba(255, 255, 255, 0.42),
-    0 0 32px rgba(255, 255, 255, 0.22);
+  display: inline-flex;
+  margin: 0 0 28px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-wash {
-    animation: none;
-    opacity: 0;
-  }
-
-  .landing-wash-a {
-    opacity: 1;
-  }
-
   .landing-copy {
     animation: none;
   }
@@ -1067,7 +1012,7 @@ h1 {
   box-sizing: border-box;
   width: 100%;
   min-height: calc(100vh - 72px);
-  padding: 16px 24px 12px;
+  padding: 16px var(--chrome-gutter) 12px;
 }
 
 .studio-main {
