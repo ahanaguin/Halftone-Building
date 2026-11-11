@@ -883,13 +883,123 @@ h1 {
   text-align: left;
 }
 
-.landing-start {
+.liquid-start {
+  --liquid-pad: 22px;
+  position: relative;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 118px;
+  min-height: 44px;
   margin: 0 0 28px;
+  padding: 0 22px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  color: #111;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.liquid-start:hover,
+.liquid-start:focus-visible {
+  background: transparent;
+  color: #111;
+}
+
+.liquid-start-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.liquid-start-layer {
+  position: absolute;
+  inset: calc(var(--liquid-pad) * -1);
+  pointer-events: none;
+  filter: url("#liquid-start-goo");
+}
+
+.liquid-start-fill {
+  position: absolute;
+  inset: var(--liquid-pad);
+  background: #fff;
+  border-radius: 999px;
+  transform-origin: center;
+}
+
+.liquid-start-blob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  background: #fff;
+  border-radius: 50%;
+  will-change: transform;
+}
+
+.liquid-start-drop {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: #fff;
+  border-radius: 50%;
+  animation: liquid-drop 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.liquid-start-label {
+  position: relative;
+  z-index: 1;
+}
+
+.liquid-start.is-splash .liquid-start-fill {
+  animation: liquid-wobble 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes liquid-drop {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+
+  42% {
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1);
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+}
+
+@keyframes liquid-wobble {
+  0% {
+    transform: scale(1, 1);
+  }
+
+  28% {
+    transform: scale(1.1, 0.88);
+  }
+
+  58% {
+    transform: scale(0.94, 1.08);
+  }
+
+  100% {
+    transform: scale(1, 1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .landing-copy {
+    animation: none;
+  }
+
+  .liquid-start-drop,
+  .liquid-start.is-splash .liquid-start-fill {
     animation: none;
   }
 }

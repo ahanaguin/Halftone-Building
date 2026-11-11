@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { hasCalibration } from './calibrate.js'
 import { beginIntroFlow } from './stepIntro.js'
 import { useVisualSession } from './visualSession.jsx'
@@ -206,6 +206,116 @@ function Screen({ title, lede, action, to, back, backTo }) {
 export const RIGHTS_NOTE =
   "Only upload music and images you own or have permission to use. You're responsible for what you create and share."
 
+const LIQUID_MS = 620
+const LIQUID_DROPS = [
+  { dx: -40, dy: -16, size: 18 },
+  { dx: 38, dy: -22, size: 16 },
+  { dx: -24, dy: 20, size: 14 },
+  { dx: 30, dy: 18, size: 15 },
+  { dx: 6, dy: -30, size: 12 },
+]
+
+function LiquidStart({ to, onStart }) {
+  const navigate = useNavigate()
+  const wrapRef = useRef(null)
+  const blobRef = useRef(null)
+  const target = useRef({ x: 0.5, y: 0.5 })
+  const pos = useRef({ x: 0.5, y: 0.5 })
+  const hover = useRef(false)
+  const [splashing, setSplashing] = useState(false)
+
+  useEffect(() => {
+    let raf = 0
+    function tick() {
+      pos.current.x += (target.current.x - pos.current.x) * 0.2
+      pos.current.y += (target.current.y - pos.current.y) * 0.2
+      const blob = blobRef.current
+      if (blob) {
+        const x = (pos.current.x - 0.5) * 52
+        const y = (pos.current.y - 0.5) * 22
+        const scale = hover.current || splashing ? 1.18 : 0.82
+        blob.style.transform = `translate(${x}px, ${y}px) scale(${scale})`
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [splashing])
+
+  function pointFrom(event) {
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect) return
+    target.current = {
+      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+    }
+  }
+
+  function go() {
+    if (splashing) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    onStart?.()
+    if (reduce) {
+      navigate(to)
+      return
+    }
+    setSplashing(true)
+    window.setTimeout(() => navigate(to), LIQUID_MS)
+  }
+
+  return (
+    <button
+      ref={wrapRef}
+      type="button"
+      className={splashing ? 'liquid-start is-splash' : 'liquid-start'}
+      onPointerEnter={(event) => {
+        hover.current = true
+        pointFrom(event)
+      }}
+      onPointerMove={pointFrom}
+      onPointerLeave={() => {
+        hover.current = false
+        target.current = { x: 0.5, y: 0.5 }
+      }}
+      onClick={go}
+    >
+      <svg className="liquid-start-defs" width="0" height="0" aria-hidden="true">
+        <defs>
+          <filter id="liquid-start-goo">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur" />
+            <feColorMatrix
+              in="blur"
+              mode="matrix"
+              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
+              result="goo"
+            />
+          </filter>
+        </defs>
+      </svg>
+      <span className="liquid-start-layer" aria-hidden="true">
+        <span className="liquid-start-fill" />
+        <span className="liquid-start-blob" ref={blobRef} />
+        {splashing
+          ? LIQUID_DROPS.map((drop, index) => (
+              <span
+                key={index}
+                className="liquid-start-drop"
+                style={{
+                  width: drop.size,
+                  height: drop.size,
+                  '--dx': `${drop.dx}px`,
+                  '--dy': `${drop.dy}px`,
+                  animationDelay: `${index * 18}ms`,
+                }}
+              />
+            ))
+          : null}
+      </span>
+      <span className="liquid-start-label">Start now</span>
+    </button>
+  )
+}
+
 export function Landing() {
   const { beginNewVisual } = useVisualSession()
   return (
@@ -214,16 +324,13 @@ export function Landing() {
         <LandingPlayer />
       </section>
       <section className="landing-copy">
-        <Link
-          className="button landing-start"
+        <LiquidStart
           to={hasCalibration() ? '/upload' : '/calibrate'}
-          onClick={() => {
+          onStart={() => {
             beginNewVisual()
             beginIntroFlow(!hasCalibration())
           }}
-        >
-          Start now
-        </Link>
+        />
         <p className="landing-note">
           Halftone is a free tool for independent musicians. We help turn your songs into animated visualizers, Spotify
           Canvas loops, and cover art, with colors and styles you choose.
