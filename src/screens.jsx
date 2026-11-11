@@ -105,7 +105,9 @@ function LandingPlayer() {
       <div className="landing-stage">
         <video
           ref={videoRef}
-          src="/Halftone-ad.mp4?v=2"
+          src="/Halftone-ad.mp4?v=3"
+          width={1440}
+          height={864}
           playsInline
           loop
           autoPlay
